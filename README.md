@@ -199,98 +199,13 @@ Build a local release APK:
 flutter build apk --release
 ```
 
-If `android/key.properties` is missing, the Android release build falls back to debug signing for internal device testing only.
-
 ---
 
-## Beta builds
+## Android beta
 
-Android beta APKs are built automatically with GitHub Actions.
+Beta APKs are available from the repository **Releases** page.
 
-### GitHub Actions
-
-The workflow lives at `.github/workflows/android-beta.yml` and runs on:
-
-- pushes to `main` or `master`
-- pull requests
-- manual runs from the **Actions** tab
-- beta tags such as `v0.1.0-beta.1`
-
-Each run checks out the project, installs Flutter stable, runs `flutter pub get`, `flutter analyze`, `flutter test` when tests exist, and builds:
-
-```bash
-flutter build apk --release
-```
-
-The downloadable artifact is named:
-
-```text
-vanta-music-beta-apk
-```
-
-When the workflow runs from a beta tag such as `v0.1.0-beta.1`, it also creates a GitHub **Prerelease** and attaches the APK to that release.
-
-To download it:
-
-1. Open the repository on GitHub.
-2. Go to **Actions**.
-3. Select the latest **Android beta APK** run.
-4. Download the `vanta-music-beta-apk` artifact from the run summary.
-
-### Manual beta tags
-
-To create a tagged beta build:
-
-```bash
-git tag v0.1.0-beta.1
-git push origin v0.1.0-beta.1
-```
-
-After the workflow finishes, open **Releases** in GitHub and download `app-release.apk` from the generated prerelease.
-
-Use the version in `pubspec.yaml` as the source of truth for the app version. The current project version is `0.1.0+1`.
-
-### Android signing
-
-For local private beta signing, copy the example file and fill it with local-only values:
-
-```bash
-cp android/key.properties.example android/key.properties
-```
-
-Example format:
-
-```properties
-storeFile=/absolute/path/to/vanta-beta.jks
-storePassword=...
-keyAlias=...
-keyPassword=...
-```
-
-Do not commit `android/key.properties`, `.jks`, or `.keystore` files. They are ignored by Git.
-
-If no release keystore is configured, the current Android Gradle setup builds the release APK with debug signing as a safe internal-beta fallback. That APK is installable for testing, but it is not suitable for Play Store or public distribution.
-
-### How to configure secrets
-
-GitHub Actions can sign release APKs when these repository secrets are present:
-
-| Secret | Value |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | Base64-encoded keystore file |
-| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
-| `ANDROID_KEY_ALIAS` | Key alias |
-| `ANDROID_KEY_PASSWORD` | Key password |
-
-Create the Base64 value locally without committing the keystore:
-
-```bash
-base64 -w 0 /absolute/path/to/vanta-beta.jks
-```
-
-Then add the secrets in GitHub under **Settings → Secrets and variables → Actions**.
-
-When all four secrets exist, the workflow decodes the keystore into the runner, creates a temporary `android/key.properties`, and builds a signed release APK. If any secret is missing, the workflow keeps building with the project's fallback signing config.
+Open the latest Vanta Music beta prerelease, then download the APK from **Assets**.
 
 ---
 
