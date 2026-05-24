@@ -11,10 +11,15 @@ class PermissionCta {
 
 PermissionCta? resolveAudioPermissionCta(MediaPermissionState? permission) {
   return switch (permission) {
-    MediaPermissionState.denied =>
-      const PermissionCta(type: PermissionCtaType.requestAudio, label: 'Otorgar permiso'),
-    MediaPermissionState.permanentlyDenied || MediaPermissionState.restricted =>
-      const PermissionCta(type: PermissionCtaType.openSettings, label: 'Abrir ajustes'),
+    MediaPermissionState.denied => const PermissionCta(
+      type: PermissionCtaType.requestAudio,
+      label: 'Permitir música',
+    ),
+    MediaPermissionState.permanentlyDenied ||
+    MediaPermissionState.restricted => const PermissionCta(
+      type: PermissionCtaType.openSettings,
+      label: 'Abrir ajustes',
+    ),
     _ => null,
   };
 }
@@ -30,7 +35,7 @@ PermissionCta? resolveNotificationPermissionCta({
   if (notificationPermission == MediaPermissionState.denied) {
     return const PermissionCta(
       type: PermissionCtaType.requestNotifications,
-      label: 'Permitir notificaciones',
+      label: 'Permitir controles',
     );
   }
 

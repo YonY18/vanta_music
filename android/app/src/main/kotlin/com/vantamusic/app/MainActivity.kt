@@ -1,4 +1,4 @@
-package com.example.vanta_music
+package com.vantamusic.app
 
 import com.ryanheise.audioservice.AudioServiceActivity
 

@@ -8,17 +8,20 @@ void main() {
       final cta = resolveAudioPermissionCta(MediaPermissionState.denied);
 
       expect(cta?.type, PermissionCtaType.requestAudio);
-      expect(cta?.label, 'Otorgar permiso');
+      expect(cta?.label, 'Permitir música');
     });
 
-    test('returns settings CTA when audio permission is permanently denied', () {
-      final cta = resolveAudioPermissionCta(
-        MediaPermissionState.permanentlyDenied,
-      );
+    test(
+      'returns settings CTA when audio permission is permanently denied',
+      () {
+        final cta = resolveAudioPermissionCta(
+          MediaPermissionState.permanentlyDenied,
+        );
 
-      expect(cta?.type, PermissionCtaType.openSettings);
-      expect(cta?.label, 'Abrir ajustes');
-    });
+        expect(cta?.type, PermissionCtaType.openSettings);
+        expect(cta?.label, 'Abrir ajustes');
+      },
+    );
   });
 
   group('resolveNotificationPermissionCta', () {
@@ -38,7 +41,7 @@ void main() {
       );
 
       expect(cta?.type, PermissionCtaType.requestNotifications);
-      expect(cta?.label, 'Permitir notificaciones');
+      expect(cta?.label, 'Permitir controles');
     });
   });
 }

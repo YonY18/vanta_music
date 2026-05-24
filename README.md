@@ -14,7 +14,7 @@ Vanta Music is a premium music player built with Flutter, focused on local/offli
 ![Flutter](https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)
 ![Dart](https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-111111?style=for-the-badge&logo=android&logoColor=3DDC84)
-![Status](https://img.shields.io/badge/status-active_development-7C3AED?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-internal_beta_prep-7C3AED?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-TBD-222222?style=for-the-badge)
 
 </div>
@@ -45,6 +45,29 @@ The visual direction is dark, minimal and premium, inspired by the clean system 
 
 ---
 
+## Current beta scope
+
+Vanta Music is being prepared for an internal Android beta focused on daily local playback.
+
+### Included now
+
+- Local music playback from MediaStore and manually selected folders.
+- FLAC and MP3 playback.
+- Background playback with notification, lockscreen, and media controls.
+- Persistent queue/session restore.
+- Local playlists, favorites, recently played, and listening stats.
+- Cached artwork for lists and player surfaces.
+- Dark, minimal, portrait-first UI.
+
+### Not in this beta
+
+- Navidrome, Jellyfin, and YouTube Music integrations.
+- Metadata editing.
+- Cloud sync.
+- Desktop/iOS support.
+
+---
+
 ## Features
 
 ### Current focus
@@ -56,6 +79,8 @@ The visual direction is dark, minimal and premium, inspired by the clean system 
 - 🧱 Clean and scalable architecture
 - 🗄️ Local persistence with SQLite
 - 📱 Android-first experience
+- 🖼️ Cached artwork for local tracks
+- 🎼 FLAC support
 
 ### Planned features
 
@@ -168,24 +193,54 @@ Run tests:
 flutter test
 ```
 
+Build a local release APK:
+
+```bash
+flutter build apk --release
+```
+
+For private beta signing, create `android/key.properties` locally. Do not commit it.
+
+```properties
+storeFile=/absolute/path/to/vanta-beta.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+If `key.properties` is missing, the local release build falls back to debug signing for device testing only.
+
 ---
 
 ## Project Structure
 
-> This structure may evolve as the project grows.
-
 ```text
 lib/
-├── core/              # Shared utilities, constants and base abstractions
-├── features/          # Feature-based modules
-│   ├── library/       # Local music library
-│   ├── player/        # Playback and player UI
-│   └── settings/      # App preferences and configuration
-├── data/              # Data sources, database and repositories
-├── domain/            # Entities, contracts and business rules
-├── presentation/      # UI, widgets and screens
-└── main.dart          # App entry point
+├── app/                  # App shell, router, theme
+├── features/
+│   ├── library/          # Local library, permissions, folders, screens
+│   ├── library_intelligence/ # Favorites, recents, play stats
+│   ├── player/           # audio_service, just_audio, player UI, session
+│   ├── playlists/        # Local playlists
+│   └── providers/        # Local and future provider abstractions
+├── shared/               # Artwork cache, widgets, utilities
+└── main.dart             # App entry point
 ```
+
+---
+
+## Internal beta checklist
+
+Before sharing a build, run through [`docs/internal-beta-checklist.md`](docs/internal-beta-checklist.md).
+
+Quick gate:
+
+- [ ] `flutter test`
+- [ ] `flutter build apk --release`
+- [ ] Long background playback test
+- [ ] Notification/lockscreen controls test
+- [ ] Large-library scroll test
+- [ ] No secrets or local files tracked by Git
 
 ---
 
@@ -233,9 +288,7 @@ lib/
 
 ## Current Status
 
-Vanta Music is currently in **active development**.
-
-The project is not production-ready yet. APIs, architecture and UI may change frequently while the foundation is being built.
+Vanta Music is in **internal beta preparation**. The current goal is daily-use stability before large new features.
 
 ---
 

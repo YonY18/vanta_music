@@ -167,7 +167,7 @@ class _SongsTab extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                     child: _PermissionBanner(
                       message:
-                          'Activá notificaciones para controles más estables en Android 13/14.',
+                          'Activá notificaciones para mantener controles estables en Android 13 o superior.',
                       ctaLabel: notificationCta.label,
                       onCta: () =>
                           _handlePermissionCta(context, ref, notificationCta),
@@ -261,13 +261,13 @@ class _SongsTab extends ConsumerWidget {
   String _emptyMessage(MediaPermissionState? permission) {
     return switch (permission) {
       MediaPermissionState.denied =>
-        'Sin permiso para leer música. Aceptá el permiso y reintentá.',
+        'Vanta necesita permiso para leer tu música local. Permitilo para armar la biblioteca.',
       MediaPermissionState.permanentlyDenied =>
-        'Permiso denegado permanentemente. Habilitalo en Ajustes del sistema.',
+        'El permiso de música quedó bloqueado. Abrí Ajustes y habilitalo manualmente.',
       MediaPermissionState.restricted =>
         'Acceso restringido por el sistema. Revisá controles parentales o políticas del dispositivo.',
       _ =>
-        'No encontré música local. Copiá canciones al dispositivo o abrí una carpeta.',
+        'No encontré música local todavía. Copiá canciones al dispositivo o abrí una carpeta.',
     };
   }
 }
