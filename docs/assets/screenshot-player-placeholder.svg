@@ -1,0 +1,21 @@
+<svg width="390" height="844" viewBox="0 0 390 844" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Vanta Music player screenshot placeholder</title>
+  <desc id="desc">Dark mobile UI placeholder for the player screen.</desc>
+  <rect width="390" height="844" rx="44" fill="#050505"/>
+  <rect x="12" y="12" width="366" height="820" rx="36" stroke="#27272A"/>
+  <text x="126" y="78" fill="#A1A1AA" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">NOW PLAYING</text>
+  <rect x="55" y="132" width="280" height="280" rx="42" fill="#111113"/>
+  <circle cx="195" cy="272" r="88" fill="#18181B" stroke="#7C3AED" stroke-opacity="0.7" stroke-width="2"/>
+  <circle cx="195" cy="272" r="18" fill="#F8FAFC"/>
+  <text x="87" y="484" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="800">Midnight Signal</text>
+  <text x="133" y="516" fill="#71717A" font-family="Inter, Arial, sans-serif" font-size="15">Vanta Artist</text>
+  <rect x="56" y="574" width="278" height="5" rx="2.5" fill="#27272A"/>
+  <rect x="56" y="574" width="126" height="5" rx="2.5" fill="#7C3AED"/>
+  <g fill="#F8FAFC">
+    <circle cx="116" cy="662" r="22" opacity="0.18"/>
+    <circle cx="195" cy="662" r="36"/>
+    <circle cx="274" cy="662" r="22" opacity="0.18"/>
+  </g>
+  <polygon points="185,646 185,678 211,662" fill="#050505"/>
+  <text x="123" y="790" fill="#52525B" font-family="Inter, Arial, sans-serif" font-size="13">Player placeholder</text>
+</svg>

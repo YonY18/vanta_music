@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- Logo / Banner Placeholder -->
-<img src="docs/assets/banner-placeholder.png" alt="Vanta Music Banner" width="100%" />
+<img src="docs/assets/banner-placeholder.svg" alt="Vanta Music Banner" width="100%" />
 
 # Vanta Music
 
@@ -39,7 +39,7 @@ The visual direction is dark, minimal and premium, inspired by the clean system 
 
 | Home | Player | Library |
 |---|---|---|
-| <img src="docs/assets/screenshot-home-placeholder.png" width="250" /> | <img src="docs/assets/screenshot-player-placeholder.png" width="250" /> | <img src="docs/assets/screenshot-library-placeholder.png" width="250" /> |
+| <img src="docs/assets/screenshot-home-placeholder.svg" width="250" /> | <img src="docs/assets/screenshot-player-placeholder.svg" width="250" /> | <img src="docs/assets/screenshot-library-placeholder.svg" width="250" /> |
 
 </div>
 

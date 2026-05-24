@@ -1,0 +1,35 @@
+<svg width="1400" height="420" viewBox="0 0 1400 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Vanta Music banner placeholder</title>
+  <desc id="desc">Dark premium banner placeholder for Vanta Music.</desc>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#7C3AED" stop-opacity="0.35"/>
+      <stop offset="45%" stop-color="#111827" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1400" y2="420">
+      <stop stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0.35"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="420" rx="36" fill="#050505"/>
+  <rect x="1" y="1" width="1398" height="418" rx="35" stroke="url(#stroke)" stroke-opacity="0.7"/>
+  <circle cx="1080" cy="140" r="260" fill="url(#glow)"/>
+  <circle cx="270" cy="360" r="180" fill="#111111"/>
+  <path d="M0 308C190 260 330 286 500 316C710 354 862 348 1040 292C1180 248 1282 236 1400 250V420H0V308Z" fill="#0B0B0F"/>
+  <g opacity="0.32">
+    <rect x="104" y="84" width="10" height="252" rx="5" fill="#FFFFFF"/>
+    <rect x="132" y="130" width="10" height="160" rx="5" fill="#FFFFFF"/>
+    <rect x="160" y="104" width="10" height="212" rx="5" fill="#FFFFFF"/>
+    <rect x="188" y="156" width="10" height="108" rx="5" fill="#FFFFFF"/>
+    <rect x="216" y="118" width="10" height="184" rx="5" fill="#FFFFFF"/>
+  </g>
+  <text x="300" y="185" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="76" font-weight="800" letter-spacing="-2">Vanta Music</text>
+  <text x="304" y="242" fill="#A1A1AA" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="500">Dark. Minimal. Fast.</text>
+  <text x="304" y="292" fill="#71717A" font-family="Inter, Arial, sans-serif" font-size="20">Premium offline music player for Android</text>
+  <g transform="translate(1120 270)">
+    <circle cx="70" cy="70" r="68" fill="#080808" stroke="#27272A" stroke-width="2"/>
+    <circle cx="70" cy="70" r="34" fill="#111111" stroke="#7C3AED" stroke-opacity="0.7" stroke-width="2"/>
+    <circle cx="70" cy="70" r="8" fill="#F8FAFC"/>
+  </g>
+</svg>
