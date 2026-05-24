@@ -1,0 +1,104 @@
+name: Android beta APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*-beta.*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-beta:
+    name: Build Android beta APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          java -version
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
+
+      - name: Run Flutter tests when present
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          tests=(test/**/*_test.dart)
+
+          if (( ${#tests[@]} == 0 )); then
+            echo "No Flutter tests found. Skipping flutter test."
+            exit 0
+          fi
+
+          flutter test
+
+      - name: Prepare Android signing when secrets are available
+        id: signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "${ANDROID_KEYSTORE_BASE64}" || -z "${ANDROID_KEYSTORE_PASSWORD}" || -z "${ANDROID_KEY_ALIAS}" || -z "${ANDROID_KEY_PASSWORD}" ]]; then
+            echo "signed=false" >> "${GITHUB_OUTPUT}"
+            echo "Android signing secrets are incomplete or missing. Building with the project's fallback signing config."
+            exit 0
+          fi
+
+          keystore_path="android/app/upload-keystore.jks"
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+
+          cat > android/key.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          EOF
+
+          echo "signed=true" >> "${GITHUB_OUTPUT}"
+          echo "Android release signing is configured for this run."
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload beta APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vanta-music-beta-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

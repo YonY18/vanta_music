@@ -1,0 +1,9 @@
+# Copy this file to android/key.properties for local release signing.
+# Never commit android/key.properties or the real keystore file.
+
+# Path is resolved from android/app/build.gradle.kts.
+# Use an absolute path locally, or place the keystore under android/app/ and use the file name.
+storeFile=/absolute/path/to/vanta-beta.jks
+storePassword=change-me
+keyAlias=vanta-beta
+keyPassword=change-me

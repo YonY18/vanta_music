@@ -68,6 +68,7 @@ out/
 *.p12
 *.jks
 *.keystore
+android/key.properties
 key.properties
 secrets.properties
 

@@ -5,6 +5,7 @@ import '../../library/domain/track.dart';
 import '../domain/library_snapshot.dart';
 import '../infrastructure/file_library_intelligence_store.dart';
 import 'library_intelligence_controller.dart';
+import 'library_intelligence_refresh.dart';
 import 'library_intelligence_reducer.dart';
 import 'library_intelligence_store.dart';
 
@@ -19,16 +20,18 @@ final libraryIntelligenceStoreProvider = Provider<LibraryIntelligenceStore>((
 final libraryIntelligenceSnapshotProvider = FutureProvider<LibrarySnapshot>((
   ref,
 ) async {
+  ref.watch(libraryIntelligenceRefreshProvider);
   final store = ref.watch(libraryIntelligenceStoreProvider);
   return store.load();
 });
 
-final libraryIntelligenceControllerProvider = Provider<LibraryIntelligenceController>((ref) {
-  return LibraryIntelligenceController(
-    store: ref.watch(libraryIntelligenceStoreProvider),
-    reducer: const LibraryIntelligenceReducer(),
-  );
-});
+final libraryIntelligenceControllerProvider =
+    Provider<LibraryIntelligenceController>((ref) {
+      return LibraryIntelligenceController(
+        store: ref.watch(libraryIntelligenceStoreProvider),
+        reducer: const LibraryIntelligenceReducer(),
+      );
+    });
 
 final favoriteTrackKeysProvider = Provider<Set<String>>((ref) {
   final snapshot =
@@ -40,7 +43,10 @@ final favoriteTrackKeysProvider = Provider<Set<String>>((ref) {
       .toSet();
 });
 
-final isTrackFavoriteByKeyProvider = Provider.family<bool, String>((ref, trackKey) {
+final isTrackFavoriteByKeyProvider = Provider.family<bool, String>((
+  ref,
+  trackKey,
+) {
   return ref.watch(favoriteTrackKeysProvider).contains(trackKey);
 });
 

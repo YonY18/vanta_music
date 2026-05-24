@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../library_intelligence/application/library_intelligence_reducer.dart';
+import '../../library_intelligence/application/library_intelligence_refresh.dart';
 import '../../library_intelligence/application/library_intelligence_sink.dart';
 import '../../library_intelligence/infrastructure/file_library_intelligence_store.dart';
 import '../infrastructure/file_playback_session_store.dart';
@@ -16,6 +17,7 @@ Future<VantaAudioHandler> initAudioHandler() async {
   final intelligenceSink = LibraryIntelligenceSink(
     store: intelligenceStore,
     reducer: const LibraryIntelligenceReducer(),
+    onChanged: libraryIntelligenceRefresh.markChanged,
   );
   await intelligenceSink.initialize();
 

@@ -6,6 +6,7 @@ import 'library_intelligence_reducer.dart';
 import 'library_intelligence_store.dart';
 
 typedef ClockNow = DateTime Function();
+typedef LibraryIntelligenceChanged = void Function();
 
 class LibraryIntelligenceSink {
   LibraryIntelligenceSink({
@@ -13,15 +14,18 @@ class LibraryIntelligenceSink {
     required LibraryIntelligenceReducer reducer,
     Duration debounceDuration = const Duration(milliseconds: 400),
     ClockNow? now,
+    LibraryIntelligenceChanged? onChanged,
   }) : _store = store,
        _reducer = reducer,
        _debounceDuration = debounceDuration,
-       _now = now ?? DateTime.now;
+       _now = now ?? DateTime.now,
+       _onChanged = onChanged;
 
   final LibraryIntelligenceStore _store;
   final LibraryIntelligenceReducer _reducer;
   final Duration _debounceDuration;
   final ClockNow _now;
+  final LibraryIntelligenceChanged? _onChanged;
 
   LibrarySnapshot _snapshot = const LibrarySnapshot.empty();
   final List<LibraryEvent> _pendingEvents = <LibraryEvent>[];
@@ -57,7 +61,9 @@ class LibraryIntelligenceSink {
   }
 
   void recordPlaybackCompleted({required String trackKey}) {
-    _record(LibraryEvent.playbackCompleted(trackKey: trackKey, timestamp: _now()));
+    _record(
+      LibraryEvent.playbackCompleted(trackKey: trackKey, timestamp: _now()),
+    );
   }
 
   Future<void> flush() async {
@@ -87,7 +93,11 @@ class LibraryIntelligenceSink {
     _debounce?.cancel();
     if (_pendingEvents.isEmpty) return _persistQueue;
     _pendingEvents.clear();
-    _persistQueue = _persistQueue.then((_) => _store.save(_snapshot));
+    final snapshot = _snapshot;
+    _persistQueue = _persistQueue.then((_) async {
+      await _store.save(snapshot);
+      _onChanged?.call();
+    });
     return _persistQueue;
   }
 }
