@@ -228,6 +228,8 @@ The downloadable artifact is named:
 vanta-music-beta-apk
 ```
 
+When the workflow runs from a beta tag such as `v0.1.0-beta.1`, it also creates a GitHub **Prerelease** and attaches the APK to that release.
+
 To download it:
 
 1. Open the repository on GitHub.
@@ -243,6 +245,8 @@ To create a tagged beta build:
 git tag v0.1.0-beta.1
 git push origin v0.1.0-beta.1
 ```
+
+After the workflow finishes, open **Releases** in GitHub and download `app-release.apk` from the generated prerelease.
 
 Use the version in `pubspec.yaml` as the source of truth for the app version. The current project version is `0.1.0+1`.
 

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-beta-${{ github.ref }}
@@ -102,3 +102,13 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish beta GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-beta.')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Vanta Music ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          prerelease: true
+          generate_release_notes: true
+          files: build/app/outputs/flutter-apk/app-release.apk
