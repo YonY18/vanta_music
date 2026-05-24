@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:on_audio_query/on_audio_query.dart';
 
+import '../../../app/theme.dart';
 import '../../../shared/widgets/artwork_tile.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
@@ -12,14 +13,10 @@ import '../application/folder_library_controller.dart';
 import '../application/library_providers.dart';
 import '../application/media_permission_service.dart';
 import '../application/permission_ux.dart';
-import '../../library_intelligence/application/library_intelligence_controller.dart';
 import '../../library_intelligence/application/library_intelligence_providers.dart';
-import '../domain/album.dart';
-import '../domain/artist.dart';
 import '../domain/track.dart';
 import '../../playlists/application/playlists_controller.dart';
 import 'library_intelligence_sections.dart';
-import 'library_list_layout.dart';
 import 'library_track_actions.dart';
 import 'library_track_favorites.dart';
 
@@ -29,10 +26,10 @@ class LibraryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 5,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Vanta Music'),
+          title: const _VantaAppTitle(),
           actions: [
             IconButton(
               tooltip: 'Abrir carpeta',
@@ -44,35 +41,19 @@ class LibraryScreen extends ConsumerWidget {
               onPressed: () => _refreshLibrary(context, ref),
               icon: const Icon(Icons.refresh_rounded),
             ),
-            IconButton(
-              tooltip: 'Buscar',
-              onPressed: () => showSearch(
-                context: context,
-                delegate: _TrackSearchDelegate(ref),
-              ),
-              icon: const Icon(Icons.search_rounded),
-            ),
           ],
           bottom: const TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: 'Inicio'),
-              Tab(text: 'Canciones'),
-              Tab(text: 'Álbumes'),
-              Tab(text: 'Artistas'),
+              Tab(text: 'Library'),
               Tab(text: 'Playlists'),
             ],
           ),
         ),
         body: const TabBarView(
-          children: [
-            _HomeTab(),
-            _SongsTab(),
-            _AlbumsTab(),
-            _ArtistsTab(),
-            _PlaylistsTab(),
-          ],
+          children: [_HomeTab(), _LibraryTab(), _PlaylistsTab()],
         ),
         bottomNavigationBar: const MiniPlayer(),
       ),
@@ -110,6 +91,31 @@ class LibraryScreen extends ConsumerWidget {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Re-escaneando biblioteca local...')),
+    );
+  }
+}
+
+class _VantaAppTitle extends StatelessWidget {
+  const _VantaAppTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Vanta Music'),
+        SizedBox(height: 2),
+        Text(
+          'Dark. Minimal. Fast.',
+          style: TextStyle(
+            color: VantaColors.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.1,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -162,7 +168,7 @@ class _SongsTab extends ConsumerWidget {
                     child: _PermissionBanner(
                       message:
                           'Activá notificaciones para controles más estables en Android 13/14.',
-                      ctaLabel: notificationCta!.label,
+                      ctaLabel: notificationCta.label,
                       onCta: () =>
                           _handlePermissionCta(context, ref, notificationCta),
                     ),
@@ -266,6 +272,108 @@ class _SongsTab extends ConsumerWidget {
   }
 }
 
+class _LibraryTab extends ConsumerWidget {
+  const _LibraryTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return DefaultTabController(
+      length: 3,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Library',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: VantaColors.text,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.6,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _LibrarySearchBar(
+                  onTap: () => showSearch(
+                    context: context,
+                    delegate: _TrackSearchDelegate(ref),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const _LibrarySegmentTabs(),
+              ],
+            ),
+          ),
+          const Expanded(
+            child: TabBarView(
+              children: [_SongsTab(), _AlbumsTab(), _ArtistsTab()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LibrarySearchBar extends StatelessWidget {
+  const _LibrarySearchBar({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          height: 48,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: VantaColors.surfaceElevated,
+            border: Border.all(color: VantaColors.border, width: 0.7),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: const Row(
+            children: [
+              Icon(Icons.search_rounded, color: VantaColors.muted, size: 20),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Search artists, albums, tracks',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: VantaColors.muted, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LibrarySegmentTabs extends StatelessWidget {
+  const _LibrarySegmentTabs();
+
+  @override
+  Widget build(BuildContext context) {
+    return const TabBar(
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      tabs: [
+        Tab(text: 'Tracks'),
+        Tab(text: 'Albums'),
+        Tab(text: 'Artists'),
+      ],
+    );
+  }
+}
+
 class _HomeTab extends ConsumerWidget {
   const _HomeTab();
 
@@ -289,24 +397,33 @@ class _HomeTab extends ConsumerWidget {
         ),
     };
 
-    if (intelligenceSections.isEmpty) {
-      return const _EmptyState(
-        message: 'Todavía no hay actividad para mostrar en Inicio.',
-      );
-    }
-
     return _ArtworkDeferredOnScroll(
       builder: (deferArtwork) => CustomScrollView(
         slivers: [
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(
+            child: _HomeMockHeader(
+              tracks: intelligenceSections.isEmpty
+                  ? const []
+                  : intelligenceSections.first.tracks,
+              deferArtwork: deferArtwork,
+              onPlayTrack: (index) {
+                final tracks = intelligenceSections.first.tracks;
+                ref.read(playerControllerProvider).playTracks(tracks, index);
+              },
+            ),
+          ),
+          if (intelligenceSections.isEmpty)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyState(
+                message: 'Todavía no hay actividad para mostrar en Inicio.',
+              ),
+            ),
           for (final sectionEntry in intelligenceSections.asMap().entries) ...[
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  sectionEntry.value.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: _SectionTitle(title: sectionEntry.value.title),
               ),
             ),
             SliverList.builder(
@@ -366,6 +483,271 @@ class _HomeTab extends ConsumerWidget {
   }
 }
 
+class _HomeMockHeader extends StatelessWidget {
+  const _HomeMockHeader({
+    required this.tracks,
+    required this.deferArtwork,
+    required this.onPlayTrack,
+  });
+
+  final List<Track> tracks;
+  final bool deferArtwork;
+  final ValueChanged<int> onPlayTrack;
+
+  @override
+  Widget build(BuildContext context) {
+    final heroTrack = tracks.isEmpty ? null : tracks.first;
+    final recentTracks = tracks.length <= 1
+        ? const <Track>[]
+        : tracks.skip(1).take(3).toList(growable: false);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _NowPlayingPreview(
+            track: heroTrack,
+            deferArtwork: deferArtwork,
+            onTap: heroTrack == null ? null : () => onPlayTrack(0),
+          ),
+          const SizedBox(height: 28),
+          const _SectionTitle(title: 'Recently added'),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              for (var index = 0; index < 3; index++) ...[
+                Expanded(
+                  child: _RecentArtworkCard(
+                    track: index < recentTracks.length
+                        ? recentTracks[index]
+                        : null,
+                    deferArtwork: deferArtwork,
+                    onTap: index < recentTracks.length
+                        ? () => onPlayTrack(index + 1)
+                        : null,
+                  ),
+                ),
+                if (index != 2) const SizedBox(width: 12),
+              ],
+            ],
+          ),
+          const SizedBox(height: 22),
+          for (var index = 0; index < 3; index++) ...[
+            _HomePreviewRow(
+              track: index < tracks.length ? tracks[index] : null,
+              onTap: index < tracks.length ? () => onPlayTrack(index) : null,
+            ),
+            if (index != 2) const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _NowPlayingPreview extends StatelessWidget {
+  const _NowPlayingPreview({
+    required this.track,
+    required this.deferArtwork,
+    required this.onTap,
+  });
+
+  final Track? track;
+  final bool deferArtwork;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        color: VantaColors.surfaceElevated,
+        border: Border.all(color: VantaColors.border, width: 0.7),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              track == null
+                  ? const _DiscPlaceholder(size: 96)
+                  : ArtworkTile(
+                      id: track!.artworkId,
+                      type: ArtworkType.AUDIO,
+                      size: 96,
+                      showPlaceholderOnly: deferArtwork,
+                    ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Now Playing',
+                      style: TextStyle(
+                        color: VantaColors.muted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      track?.title ?? 'Nothing playing yet',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: VantaColors.text,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.35,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      track?.artist ?? 'Start your local library',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: VantaColors.muted,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecentArtworkCard extends StatelessWidget {
+  const _RecentArtworkCard({
+    required this.track,
+    required this.deferArtwork,
+    required this.onTap,
+  });
+
+  final Track? track;
+  final bool deferArtwork;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Card(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onTap,
+          child: Center(
+            child: track == null
+                ? const Icon(Icons.album_rounded, color: VantaColors.muted)
+                : ArtworkTile(
+                    id: track!.artworkId,
+                    type: ArtworkType.AUDIO,
+                    size: 72,
+                    showPlaceholderOnly: deferArtwork,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomePreviewRow extends StatelessWidget {
+  const _HomePreviewRow({required this.track, required this.onTap});
+
+  final Track? track;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: VantaColors.surfaceHigh.withValues(alpha: 0.72),
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: VantaColors.border,
+          ),
+          child: const Icon(Icons.music_note_rounded, size: 18),
+        ),
+        title: Text(
+          track?.title ?? 'Local track preview',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          track?.artist ?? 'Waiting for library activity',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscPlaceholder extends StatelessWidget {
+  const _DiscPlaceholder({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: VantaColors.surfaceHigh,
+        border: Border.all(
+          color: VantaColors.violet.withValues(alpha: 0.68),
+          width: 1.4,
+        ),
+      ),
+      child: Center(
+        child: Container(
+          width: size * 0.24,
+          height: size * 0.24,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: VantaColors.text,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+        color: VantaColors.text,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.2,
+      ),
+    );
+  }
+}
+
 class _AlbumsTab extends ConsumerWidget {
   const _AlbumsTab();
 
@@ -378,23 +760,25 @@ class _AlbumsTab extends ConsumerWidget {
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final album = albums[index];
-        return ListTile(
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => _CollectionTracksScreen(
-                title: album.title,
-                subtitle: album.artist,
-                tracksProvider: albumTracksProvider(album.id),
+        return Card(
+          child: ListTile(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => _CollectionTracksScreen(
+                  title: album.title,
+                  subtitle: album.artist,
+                  tracksProvider: albumTracksProvider(album.id),
+                ),
               ),
             ),
+            leading: ArtworkTile(id: album.artworkId, type: ArtworkType.ALBUM),
+            title: Text(
+              album.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text('${album.artist} • ${album.trackCount} canciones'),
           ),
-          leading: ArtworkTile(id: album.artworkId, type: ArtworkType.ALBUM),
-          title: Text(
-            album.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text('${album.artist} • ${album.trackCount} canciones'),
         );
       },
     );
@@ -413,23 +797,28 @@ class _ArtistsTab extends ConsumerWidget {
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final artist = artists[index];
-        return ListTile(
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => _CollectionTracksScreen(
-                title: artist.name,
-                subtitle: '${artist.trackCount} canciones',
-                tracksProvider: artistTracksProvider(artist.id),
+        return Card(
+          child: ListTile(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => _CollectionTracksScreen(
+                  title: artist.name,
+                  subtitle: '${artist.trackCount} canciones',
+                  tracksProvider: artistTracksProvider(artist.id),
+                ),
               ),
             ),
+            leading: const CircleAvatar(
+              backgroundColor: VantaColors.surfaceHigh,
+              child: Icon(Icons.person_rounded),
+            ),
+            title: Text(
+              artist.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text('${artist.trackCount} canciones'),
           ),
-          leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
-          title: Text(
-            artist.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text('${artist.trackCount} canciones'),
         );
       },
     );
@@ -534,18 +923,18 @@ class _PlaylistsTab extends ConsumerWidget {
               separatorBuilder: (_, _) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return FilledButton.icon(
-                    onPressed: () => _createPlaylist(context, ref),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Crear playlist'),
+                  return _PlaylistCreateCard(
+                    onTap: () => _createPlaylist(context, ref),
                   );
                 }
 
                 final playlist = items[index - 1];
-                return ListTile(
-                  leading: const Icon(Icons.playlist_play_rounded),
-                  title: Text(playlist.name),
-                  subtitle: Text('${playlist.tracks.length} canciones'),
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.playlist_play_rounded),
+                    title: Text(playlist.name),
+                    subtitle: Text('${playlist.tracks.length} canciones'),
+                  ),
                 );
               },
             ),
@@ -620,27 +1009,60 @@ class _TrackTile extends ConsumerWidget {
               .valueOrNull;
 
     return Card(
-      margin: EdgeInsets.zero,
-      child: ListTile(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
         onTap: onTap,
         onLongPress: onOpenActions,
-        leading: ArtworkTile(
-          id: track.artworkId,
-          type: ArtworkType.AUDIO,
-          showPlaceholderOnly: deferArtwork,
-          cachedArtworkPath: cachedArtworkPath,
-        ),
-        title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${track.artist} • ${track.album}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: IconButton(
-          tooltip: isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
-          onPressed: onToggleFavorite,
-          icon: Icon(
-            isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              ArtworkTile(
+                id: track.artworkId,
+                type: ArtworkType.AUDIO,
+                showPlaceholderOnly: deferArtwork,
+                cachedArtworkPath: cachedArtworkPath,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${track.artist} • ${track.album}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: VantaColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: isFavorite
+                    ? 'Quitar de favoritos'
+                    : 'Agregar a favoritos',
+                onPressed: onToggleFavorite,
+                icon: Icon(
+                  isFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: isFavorite ? VantaColors.violet : VantaColors.muted,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -649,30 +1071,60 @@ class _TrackTile extends ConsumerWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message, this.ctaLabel, this.onCta});
+  const _EmptyState({
+    required this.message,
+    this.ctaLabel,
+    this.onCta,
+    this.icon = Icons.library_music_rounded,
+  });
 
   final String message;
   final String? ctaLabel;
   final VoidCallback? onCta;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge,
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: VantaColors.violet.withValues(alpha: 0.14),
+                      border: Border.all(
+                        color: VantaColors.violet.withValues(alpha: 0.38),
+                      ),
+                    ),
+                    child: Icon(icon, color: VantaColors.text, size: 30),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: VantaColors.text,
+                      height: 1.35,
+                    ),
+                  ),
+                  if (ctaLabel != null && onCta != null) ...[
+                    const SizedBox(height: 18),
+                    FilledButton(onPressed: onCta, child: Text(ctaLabel!)),
+                  ],
+                ],
+              ),
             ),
-            if (ctaLabel != null && onCta != null) ...[
-              const SizedBox(height: 16),
-              FilledButton(onPressed: onCta, child: Text(ctaLabel!)),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -693,18 +1145,144 @@ class _PermissionBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      color: VantaColors.violet.withValues(alpha: 0.12),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            const Icon(Icons.notifications_active_outlined),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: VantaColors.violet.withValues(alpha: 0.18),
+              ),
+              child: const Icon(Icons.notifications_active_outlined, size: 20),
+            ),
             const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: VantaColors.text,
+                  height: 1.35,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             TextButton(onPressed: onCta, child: Text(ctaLabel)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader({required this.title, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: VantaColors.text,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: VantaColors.muted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetActionTile extends StatelessWidget {
+  const _SheetActionTile({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Card(
+        child: ListTile(
+          onTap: onTap,
+          leading: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: VantaColors.surfaceHigh,
+            ),
+            child: Icon(icon, size: 20),
+          ),
+          title: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: subtitle == null
+              ? null
+              : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaylistCreateCard extends StatelessWidget {
+  const _PlaylistCreateCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: VantaColors.violet.withValues(alpha: 0.16),
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: VantaColors.violet.withValues(alpha: 0.18),
+          ),
+          child: const Icon(Icons.add_rounded),
+        ),
+        title: const Text(
+          'Crear playlist',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: const Text('Organizá tu biblioteca local'),
       ),
     );
   }
@@ -741,6 +1319,19 @@ class _TrackSearchDelegate extends SearchDelegate<void> {
 
   Widget _results(BuildContext context) {
     final results = ref.watch(filteredTracksProvider(query));
+    if (query.trim().isEmpty) {
+      return const _EmptyState(
+        icon: Icons.search_rounded,
+        message: 'Buscá canciones por título, artista o álbum.',
+      );
+    }
+    if (results.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.search_off_rounded,
+        message: 'No encontré canciones con esa búsqueda.',
+      );
+    }
+
     final favoriteTrackKeys = ref.watch(favoriteTrackKeysProvider);
     final favoriteFlags = mapTrackFavoriteFlags(
       tracks: results,
@@ -749,29 +1340,18 @@ class _TrackSearchDelegate extends SearchDelegate<void> {
 
     return _ArtworkDeferredOnScroll(
       builder: (deferArtwork) => ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 104),
         itemCount: results.length,
-        itemBuilder: (context, index) => _TrackTile(
-          track: results[index],
-          deferArtwork: deferArtwork,
-          onTap: () {
-            ref.read(playerControllerProvider).playTracks(results, index);
-            close(context, null);
-            context.push('/now-playing');
-          },
-          isFavorite: favoriteFlags[index],
-          onToggleFavorite: () async {
-            await ref
-                .read(libraryIntelligenceControllerProvider)
-                .toggleFavoriteForTrack(results[index]);
-            ref.invalidate(libraryIntelligenceSnapshotProvider);
-          },
-          onAddToPlaylist: () => _showAddToPlaylistSheet(
-            context: context,
-            ref: ref,
+        itemBuilder: (context, index) => Padding(
+          padding: EdgeInsets.only(bottom: index == results.length - 1 ? 0 : 8),
+          child: _TrackTile(
             track: results[index],
-          ),
-          onOpenActions: () => showTrackQuickActionsSheet(
-            context: context,
+            deferArtwork: deferArtwork,
+            onTap: () {
+              ref.read(playerControllerProvider).playTracks(results, index);
+              close(context, null);
+              context.push('/now-playing');
+            },
             isFavorite: favoriteFlags[index],
             onToggleFavorite: () async {
               await ref
@@ -783,6 +1363,21 @@ class _TrackSearchDelegate extends SearchDelegate<void> {
               context: context,
               ref: ref,
               track: results[index],
+            ),
+            onOpenActions: () => showTrackQuickActionsSheet(
+              context: context,
+              isFavorite: favoriteFlags[index],
+              onToggleFavorite: () async {
+                await ref
+                    .read(libraryIntelligenceControllerProvider)
+                    .toggleFavoriteForTrack(results[index]);
+                ref.invalidate(libraryIntelligenceSnapshotProvider);
+              },
+              onAddToPlaylist: () => _showAddToPlaylistSheet(
+                context: context,
+                ref: ref,
+                track: results[index],
+              ),
             ),
           ),
         ),
@@ -835,27 +1430,38 @@ Future<void> showAddToPlaylistSheet({
 
   await showModalBottomSheet<void>(
     context: context,
-    builder: (context) => ListView.builder(
-      shrinkWrap: true,
-      itemCount: playlists.length,
-      itemBuilder: (context, index) {
-        final playlist = playlists[index];
-        return ListTile(
-          title: Text(playlist.name),
-          subtitle: Text('${playlist.tracks.length} canciones'),
-          onTap: () async {
-            await ref
-                .read(playlistsControllerProvider.notifier)
-                .addTrackToPlaylist(playlistId: playlist.id, track: track);
-            if (context.mounted) {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Agregada a ${playlist.name}.')),
-              );
-            }
-          },
-        );
-      },
+    builder: (context) => SafeArea(
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 12),
+        itemCount: playlists.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return const _SheetHeader(
+              title: 'Agregar a playlist',
+              subtitle: 'Elegí una lista local para guardar esta canción.',
+            );
+          }
+
+          final playlist = playlists[index - 1];
+          return _SheetActionTile(
+            icon: Icons.playlist_play_rounded,
+            title: playlist.name,
+            subtitle: '${playlist.tracks.length} canciones',
+            onTap: () async {
+              await ref
+                  .read(playlistsControllerProvider.notifier)
+                  .addTrackToPlaylist(playlistId: playlist.id, track: track);
+              if (context.mounted) {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Agregada a ${playlist.name}.')),
+                );
+              }
+            },
+          );
+        },
+      ),
     ),
   );
 }
@@ -870,24 +1476,34 @@ Future<void> showTrackQuickActionsSheet({
 
   await showModalBottomSheet<void>(
     context: context,
-    builder: (context) => ListView.builder(
-      shrinkWrap: true,
-      itemCount: actions.length,
-      itemBuilder: (context, index) {
-        final action = actions[index];
-        return ListTile(
-          leading: Icon(action.icon),
-          title: Text(action.label),
-          onTap: () async {
-            Navigator.of(context).pop();
-            if (action.type == TrackQuickActionType.toggleFavorite) {
-              await onToggleFavorite();
-              return;
-            }
-            await onAddToPlaylist();
-          },
-        );
-      },
+    builder: (context) => SafeArea(
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 12),
+        itemCount: actions.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return const _SheetHeader(
+              title: 'Acciones rápidas',
+              subtitle: 'Opciones livianas para tu biblioteca local.',
+            );
+          }
+
+          final action = actions[index - 1];
+          return _SheetActionTile(
+            icon: action.icon,
+            title: action.label,
+            onTap: () async {
+              Navigator.of(context).pop();
+              if (action.type == TrackQuickActionType.toggleFavorite) {
+                await onToggleFavorite();
+                return;
+              }
+              await onAddToPlaylist();
+            },
+          );
+        },
+      ),
     ),
   );
 }

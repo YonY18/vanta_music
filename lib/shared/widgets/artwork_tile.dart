@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:on_audio_query/on_audio_query.dart';
 
+import '../../app/theme.dart';
 import 'artwork_query_sizing.dart';
 
 class ArtworkTile extends StatelessWidget {
@@ -22,7 +23,7 @@ class ArtworkTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(16);
+    final radius = BorderRadius.circular(18);
     final querySize = resolveArtworkQuerySize(
       logicalSize: size,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -82,16 +83,18 @@ class ArtworkTile extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: radius,
+        border: Border.all(color: VantaColors.border, width: 0.6),
         gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: [
-            Theme.of(context).colorScheme.primary.withValues(alpha: 0.75),
-            Theme.of(
-              context,
-            ).colorScheme.secondaryContainer.withValues(alpha: 0.55),
+            VantaColors.violet.withValues(alpha: 0.62),
+            VantaColors.surfaceHigh,
+            VantaColors.surfaceElevated,
           ],
         ),
       ),
-      child: const Icon(Icons.music_note_rounded, color: Colors.white),
+      child: const Icon(Icons.music_note_rounded, color: VantaColors.text),
     );
   }
 }

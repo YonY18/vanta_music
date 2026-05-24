@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/theme.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
 import '../application/media_item_artwork_request.dart';
@@ -21,6 +22,7 @@ class MiniPlayer extends ConsumerWidget {
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Card(
+        color: VantaColors.surfaceElevated.withValues(alpha: 0.96),
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
           onTap: () => context.push('/now-playing'),
@@ -47,11 +49,16 @@ class MiniPlayer extends ConsumerWidget {
                         item.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
                         item.artist ?? 'Desconocido',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: VantaColors.muted,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -83,7 +90,7 @@ class _MiniPlayerArtwork extends ConsumerWidget {
         : ref.watch(trackArtworkPathProvider(request)).valueOrNull;
 
     if (path == null) {
-      return const Icon(Icons.music_note_rounded);
+      return const Icon(Icons.music_note_rounded, color: VantaColors.text);
     }
 
     return ClipRRect(
@@ -91,7 +98,7 @@ class _MiniPlayerArtwork extends ConsumerWidget {
       child: Image.file(
         File(path),
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded),
+        errorBuilder: (_, _, _) => const Icon(Icons.music_note_rounded),
       ),
     );
   }
@@ -102,13 +109,19 @@ class _MiniPlayerPlayPauseButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playing =
-        ref.watch(playbackStateProvider.select((value) => value.valueOrNull?.playing ?? false));
+    final playing = ref.watch(
+      playbackStateProvider.select(
+        (value) => value.valueOrNull?.playing ?? false,
+      ),
+    );
     final controller = ref.read(playerControllerProvider);
 
     return IconButton(
       onPressed: playing ? controller.pause : controller.play,
-      icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+      icon: Icon(
+        playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+        color: VantaColors.text,
+      ),
     );
   }
 }
