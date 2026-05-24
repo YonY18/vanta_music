@@ -95,11 +95,26 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
+      - name: Prepare APK package
+        id: package_apk
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            apk_name="vanta-music-${GITHUB_REF_NAME}.apk"
+          else
+            apk_name="vanta-music-beta-${GITHUB_RUN_NUMBER}.apk"
+          fi
+
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/${apk_name}"
+          echo "apk_path=dist/${apk_name}" >> "${GITHUB_OUTPUT}"
+
       - name: Upload beta APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: vanta-music-beta-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ steps.package_apk.outputs.apk_path }}
           if-no-files-found: error
           retention-days: 14
 
@@ -111,4 +126,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: true
           generate_release_notes: true
-          files: build/app/outputs/flutter-apk/app-release.apk
+          body: |
+            Android beta build for Vanta Music.
+
+            Download the APK attached to this prerelease and install it on an Android device for internal testing.
+
+            This build is intended for beta validation, not public store distribution.
+          files: ${{ steps.package_apk.outputs.apk_path }}
