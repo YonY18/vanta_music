@@ -1,46 +1,159 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+# ─────────────────────────────────────────────
+# Vanta Music — Flutter / Dart / Android
+# ─────────────────────────────────────────────
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Dart / Flutter
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
+.packages
 .pub-cache/
 .pub/
-/build/
-/coverage/
-.atl/
+build/
+coverage/
 
-# Symbolication related
-app.*.symbols
+# Generated Dart files
+*.g.dart
+*.freezed.dart
+*.mocks.dart
+*.config.dart
+*.drift.dart
 
-# Obfuscation related
-app.*.map.json
+# Flutter build artifacts
+ios/Flutter/.last_build_id
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+**/doc/api/
 
-# Android Studio will place build artifacts here
+# Android build outputs
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/**/build/
+android/**/.cxx/
+android/**/outputs/
+android/**/intermediates/
+android/**/generated/
+android/**/tmp/
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VSCode
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Local environment files and secrets
+.env
+.env.*
+*.env
+*.local
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+key.properties
+secrets.properties
+
+# Firebase / Google services
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.cache/
+tmp/
+temp/
+
+# System files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+*.bak
+
+# Windows
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# SQLite / local databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Test artifacts
+test-results/
+reports/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Crashlytics
+crashlytics-build.properties
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
+
+# Native build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Future desktop targets
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+macos/Flutter/ephemeral/
+
+# Misc generated files
+generated/
+gen/
+migrate_working_dir/
+.atl/
