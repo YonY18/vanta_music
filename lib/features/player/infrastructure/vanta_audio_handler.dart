@@ -6,11 +6,13 @@ import 'package:just_audio/just_audio.dart';
 import '../../library_intelligence/application/library_intelligence_sink.dart';
 import '../../library/application/file_validation_cache.dart';
 import '../../library/domain/track.dart';
+import '../application/player_controller.dart';
 import '../application/playback_session_store.dart';
 import '../domain/playback_session.dart';
 
 class VantaAudioHandler extends BaseAudioHandler
-    with QueueHandler, SeekHandler {
+    with QueueHandler, SeekHandler
+    implements PlayerAudioControl {
   VantaAudioHandler({
     PlaybackSessionStore? sessionStore,
     InMemoryFileValidationCache? validationCache,
@@ -70,7 +72,9 @@ class VantaAudioHandler extends BaseAudioHandler
     }
   }
 
+  @override
   Stream<Duration> get positionStream => _player.positionStream;
+  @override
   Stream<Duration?> get durationStream => _player.durationStream;
 
   Future<void> setQueueAndPlay(
@@ -79,7 +83,7 @@ class VantaAudioHandler extends BaseAudioHandler
   }) async {
     if (tracks.isEmpty) return;
 
-    final items = tracks.map(_toMediaItem).toList(growable: false);
+    final items = tracks.map(mediaItemFromTrack).toList(growable: false);
     queue.add(items);
     mediaItem.add(items[initialIndex]);
 
@@ -93,6 +97,10 @@ class VantaAudioHandler extends BaseAudioHandler
     await play();
     _scheduleSessionPersist();
   }
+
+  @override
+  Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) =>
+      setQueueAndPlay(tracks, initialIndex: initialIndex);
 
   @override
   Future<void> playMediaItem(MediaItem mediaItem) async {
@@ -124,14 +132,53 @@ class VantaAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> skipToQueueItem(int index) =>
-      _player.seek(Duration.zero, index: index).then((_) => _scheduleSessionPersist());
+  Future<void> skipToQueueItem(int index) => _player
+      .seek(Duration.zero, index: index)
+      .then((_) => _scheduleSessionPersist());
 
   @override
-  Future<void> skipToNext() => _player.seekToNext().then((_) => _scheduleSessionPersist());
+  Future<void> removeQueueItemById(String mediaItemId) async {
+    final items = queue.value;
+    final index = items.indexWhere((item) => item.id == mediaItemId);
+    if (index < 0) return;
+
+    queue.add(removeQueueItems(items, mediaItemId));
+    await _player.removeAudioSourceAt(index);
+    _scheduleSessionPersist();
+  }
 
   @override
-  Future<void> skipToPrevious() => _player.seekToPrevious().then((_) => _scheduleSessionPersist());
+  Future<void> playNext(Track track) async {
+    final item = mediaItemFromTrack(track);
+    final items = queue.value;
+    final currentIndex = _player.currentIndex;
+    final insertIndex = _playNextIndex(items.length, currentIndex);
+
+    queue.add(insertPlayNext(items, item, currentIndex: currentIndex));
+    await _player.insertAudioSource(
+      insertIndex,
+      AudioSource.uri(Uri.parse(item.id), tag: item),
+    );
+    _scheduleSessionPersist();
+  }
+
+  @override
+  Future<void> addToQueueEnd(Track track) async {
+    final item = mediaItemFromTrack(track);
+    queue.add(appendToQueueEnd(queue.value, item));
+    await _player.addAudioSource(
+      AudioSource.uri(Uri.parse(item.id), tag: item),
+    );
+    _scheduleSessionPersist();
+  }
+
+  @override
+  Future<void> skipToNext() =>
+      _player.seekToNext().then((_) => _scheduleSessionPersist());
+
+  @override
+  Future<void> skipToPrevious() =>
+      _player.seekToPrevious().then((_) => _scheduleSessionPersist());
 
   @override
   Future<void> stop() async {
@@ -161,7 +208,7 @@ class VantaAudioHandler extends BaseAudioHandler
     return item.id.isEmpty ? null : item.id;
   }
 
-  MediaItem _toMediaItem(Track track) {
+  static MediaItem mediaItemFromTrack(Track track) {
     return MediaItem(
       id: track.uri.toString(),
       title: track.title,
@@ -174,6 +221,38 @@ class VantaAudioHandler extends BaseAudioHandler
         'artworkId': track.artworkId,
       },
     );
+  }
+
+  static List<MediaItem> removeQueueItems(
+    List<MediaItem> items,
+    String mediaItemId,
+  ) {
+    return items
+        .where((item) => item.id != mediaItemId)
+        .toList(growable: false);
+  }
+
+  static List<MediaItem> insertPlayNext(
+    List<MediaItem> items,
+    MediaItem item, {
+    required int? currentIndex,
+  }) {
+    final updated = List<MediaItem>.of(items);
+    updated.insert(_playNextIndex(items.length, currentIndex), item);
+    return List.unmodifiable(updated);
+  }
+
+  static List<MediaItem> appendToQueueEnd(
+    List<MediaItem> items,
+    MediaItem item,
+  ) {
+    return List.unmodifiable([...items, item]);
+  }
+
+  static int _playNextIndex(int queueLength, int? currentIndex) {
+    if (queueLength <= 0) return 0;
+    if (currentIndex == null || currentIndex < 0) return queueLength;
+    return (currentIndex + 1).clamp(0, queueLength);
   }
 
   void _broadcastState(PlaybackEvent event) {
@@ -230,7 +309,11 @@ class VantaAudioHandler extends BaseAudioHandler
     final duration = (_player.duration ?? item.duration)?.inMilliseconds ?? 0;
     if (position <= 0 || duration <= 0) return;
 
-    sink.recordProgress(trackKey: trackKey, positionMs: position, durationMs: duration);
+    sink.recordProgress(
+      trackKey: trackKey,
+      positionMs: position,
+      durationMs: duration,
+    );
   }
 
   void _emitCompletedIfNeeded() {
@@ -239,7 +322,9 @@ class VantaAudioHandler extends BaseAudioHandler
     final item = mediaItem.value;
     if (sink == null || item == null) return;
     final trackKey = normalizeTrackKey(item);
-    if (trackKey == null || trackKey.isEmpty || trackKey == _lastCompletedTrackKey) {
+    if (trackKey == null ||
+        trackKey.isEmpty ||
+        trackKey == _lastCompletedTrackKey) {
       return;
     }
     sink.recordPlaybackCompleted(trackKey: trackKey);
@@ -247,14 +332,15 @@ class VantaAudioHandler extends BaseAudioHandler
   }
 
   void _scheduleSessionPersist() {
-    if (_sessionStore == null) return;
+    final store = _sessionStore;
+    if (store == null) return;
     _persistDebounce?.cancel();
     _persistDebounce = Timer(const Duration(milliseconds: 350), () async {
       final currentQueue = queue.value;
       final index = _player.currentIndex;
       if (currentQueue.isEmpty || index == null || index < 0) return;
 
-      await _sessionStore!.save(
+      await store.save(
         PlaybackSession(
           queue: currentQueue,
           currentIndex: index,
@@ -266,23 +352,27 @@ class VantaAudioHandler extends BaseAudioHandler
 
   _SafeSessionResult? _safeSession(PlaybackSession session) {
     final pendingReconcileUris = <Uri>[];
-    final cleanedQueue = session.queue.where((item) {
-      final uri = Uri.tryParse(item.id);
-      if (uri == null) return false;
-      if (uri.scheme == 'file') {
-        final cached = _validationCache.read(uri);
-        if (cached != null) {
-          pendingReconcileUris.add(uri);
-          return cached.state == ValidationState.valid;
-        }
-        pendingReconcileUris.add(uri);
-      }
-      return true;
-    }).toList(growable: false);
+    final cleanedQueue = session.queue
+        .where((item) {
+          final uri = Uri.tryParse(item.id);
+          if (uri == null) return false;
+          if (uri.scheme == 'file') {
+            final cached = _validationCache.read(uri);
+            if (cached != null) {
+              pendingReconcileUris.add(uri);
+              return cached.state == ValidationState.valid;
+            }
+            pendingReconcileUris.add(uri);
+          }
+          return true;
+        })
+        .toList(growable: false);
 
     if (cleanedQueue.isEmpty) return null;
     final maxIndex = cleanedQueue.length - 1;
-    final index = session.currentIndex > maxIndex ? maxIndex : session.currentIndex;
+    final index = session.currentIndex > maxIndex
+        ? maxIndex
+        : session.currentIndex;
 
     return _SafeSessionResult(
       queue: cleanedQueue,

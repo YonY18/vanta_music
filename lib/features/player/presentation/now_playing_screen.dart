@@ -25,6 +25,11 @@ class NowPlayingScreen extends ConsumerWidget {
             ? null
             : [
                 IconButton(
+                  tooltip: 'Queue',
+                  onPressed: () => _showQueueSheet(context),
+                  icon: const Icon(Icons.queue_music_rounded),
+                ),
+                IconButton(
                   tooltip: 'Track info',
                   onPressed: () => _showTrackInfoSheet(context, item),
                   icon: const Icon(Icons.info_outline_rounded),
@@ -33,39 +38,42 @@ class NowPlayingScreen extends ConsumerWidget {
       ),
       body: item == null
           ? const _EmptyNowPlaying()
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-              child: Column(
-                children: [
-                  const Spacer(),
-                  _NowPlayingArtwork(item: item),
-                  const SizedBox(height: 32),
-                  Text(
-                    item.title,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: VantaColors.text,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.6,
+          : SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 24),
+                    _NowPlayingArtwork(item: item),
+                    const SizedBox(height: 32),
+                    Text(
+                      item.title,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: VantaColors.text,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.6,
+                          ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    item.artist ?? 'Desconocido',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyLarge?.copyWith(color: VantaColors.muted),
-                  ),
-                  const SizedBox(height: 24),
-                  const _NowPlayingPositionSection(),
-                  const SizedBox(height: 24),
-                  const _NowPlayingControls(),
-                  const Spacer(),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      item.artist ?? 'Desconocido',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyLarge?.copyWith(color: VantaColors.muted),
+                    ),
+                    const SizedBox(height: 24),
+                    const _NowPlayingPositionSection(),
+                    const SizedBox(height: 24),
+                    const _NowPlayingControls(),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
     );
@@ -186,25 +194,136 @@ void _showTrackInfoSheet(BuildContext context, MediaItem item) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Track info', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            _InfoRow(label: 'Título', value: item.title),
-            _InfoRow(label: 'Artista', value: item.artist ?? 'Desconocido'),
-            _InfoRow(label: 'Álbum', value: item.album ?? 'Desconocido'),
-            _InfoRow(label: 'Duración', value: duration),
-            _InfoRow(label: 'URI', value: item.id),
-          ],
-        ),
-      ),
+    isScrollControlled: true,
+    builder: (context) => Consumer(
+      builder: (context, ref, _) {
+        final track = trackArtworkRequestFromMediaItem(
+          item: item,
+          sizePx: 1,
+        )?.track;
+        final controller = ref.read(playerControllerProvider);
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Track info',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  _InfoRow(label: 'Título', value: item.title),
+                  _InfoRow(
+                    label: 'Artista',
+                    value: item.artist ?? 'Desconocido',
+                  ),
+                  _InfoRow(label: 'Álbum', value: item.album ?? 'Desconocido'),
+                  _InfoRow(label: 'Duración', value: duration),
+                  _InfoRow(label: 'URI', value: item.id),
+                  if (track != null) ...[
+                    const Divider(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.queue_play_next_rounded),
+                      title: const Text('Play next'),
+                      onTap: () => controller.playNext(track),
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.playlist_add_rounded),
+                      title: const Text('Add to queue end'),
+                      onTap: () => controller.addToQueueEnd(track),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     ),
   );
+}
+
+void _showQueueSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => const SafeArea(child: _QueueSheet()),
+  );
+}
+
+class _QueueSheet extends ConsumerWidget {
+  const _QueueSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queue = ref.watch(currentQueueProvider).valueOrNull ?? const [];
+    final controller = ref.read(playerControllerProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Up next', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (queue.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                'Queue is empty.',
+                style: TextStyle(color: VantaColors.muted),
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: queue.length,
+                itemBuilder: (context, index) {
+                  final item = queue[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      item.artist ?? 'Unknown artist',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () => controller.jumpToQueueItem(index),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          tooltip: 'Play ${item.title}',
+                          onPressed: () => controller.jumpToQueueItem(index),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Remove ${item.title} from queue',
+                          onPressed: () => controller.removeFromQueue(item.id),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _InfoRow extends StatelessWidget {

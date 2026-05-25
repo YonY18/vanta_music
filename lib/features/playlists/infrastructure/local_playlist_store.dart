@@ -14,7 +14,13 @@ class LocalPlaylistStore {
     final file = await _file();
     if (!await file.exists()) return const [];
 
-    final decoded = jsonDecode(await file.readAsString());
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(await file.readAsString());
+    } on FormatException {
+      return const [];
+    }
+
     if (decoded is! List) return const [];
 
     return decoded
@@ -43,20 +49,22 @@ class LocalPlaylistStore {
       'description': playlist.description,
       'createdAt': playlist.createdAt?.toIso8601String(),
       'updatedAt': playlist.updatedAt?.toIso8601String(),
-      'tracks': playlist.tracks.map((track) {
-        return {
-          'id': track.id,
-          'providerId': track.providerId,
-          'title': track.title,
-          'artist': track.artist,
-          'album': track.album,
-          'uri': track.uri.toString(),
-          'albumId': track.albumId,
-          'artistId': track.artistId,
-          'durationMs': track.duration?.inMilliseconds,
-          'artworkId': track.artworkId,
-        };
-      }).toList(growable: false),
+      'tracks': playlist.tracks
+          .map((track) {
+            return {
+              'id': track.id,
+              'providerId': track.providerId,
+              'title': track.title,
+              'artist': track.artist,
+              'album': track.album,
+              'uri': track.uri.toString(),
+              'albumId': track.albumId,
+              'artistId': track.artistId,
+              'durationMs': track.duration?.inMilliseconds,
+              'artworkId': track.artworkId,
+            };
+          })
+          .toList(growable: false),
     };
   }
 
@@ -65,7 +73,8 @@ class LocalPlaylistStore {
     final name = json['name']?.toString();
     if (id == null || id.isEmpty || name == null || name.isEmpty) return null;
 
-    final tracks = (json['tracks'] as List?)
+    final tracks =
+        (json['tracks'] as List?)
             ?.whereType<Map<String, dynamic>>()
             .map(_trackFromJson)
             .whereType<Track>()

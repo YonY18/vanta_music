@@ -100,6 +100,73 @@ void main() {
   );
 
   test(
+    'bounds top listened and history lists while filtering ghost tracks',
+    () {
+      final tracks = List.generate(
+        4,
+        (index) => Track(
+          id: '$index',
+          providerId: 'local',
+          title: 'Track $index',
+          artist: index.isEven ? 'Even Artist' : 'Odd Artist',
+          album: index < 2 ? 'First Album' : 'Second Album',
+          uri: Uri.parse('content://song/$index'),
+          duration: Duration(seconds: 100 + index),
+        ),
+      );
+      final snapshot = LibrarySnapshot(
+        schemaVersion: 1,
+        tracks: {
+          for (final track in tracks)
+            'local::${track.id}': LibraryTrackSnapshot(
+              trackKey: 'local::${track.id}',
+              playCount: int.parse(track.id) + 1,
+              lastPlayedAt: DateTime.utc(2026, 1, 1, 10 + int.parse(track.id)),
+              resumePositionMs: 0,
+              durationMs: track.duration!.inMilliseconds,
+              isFavorite: false,
+              favoritedAt: null,
+              isCompleted: true,
+            ),
+        },
+        history: [
+          PlaybackHistoryEntry(
+            trackKey: 'local::3',
+            listenedAt: DateTime.utc(2026, 1, 1, 13),
+            listenedDurationMs: 103000,
+            completed: true,
+          ),
+          PlaybackHistoryEntry(
+            trackKey: 'local::ghost',
+            listenedAt: DateTime.utc(2026, 1, 1, 14),
+            listenedDurationMs: 999000,
+            completed: true,
+          ),
+          PlaybackHistoryEntry(
+            trackKey: 'local::2',
+            listenedAt: DateTime.utc(2026, 1, 1, 12),
+            listenedDurationMs: 102000,
+            completed: false,
+          ),
+        ],
+      );
+
+      final mapping = mapLibraryIntelligence(
+        snapshot: snapshot,
+        tracks: tracks,
+        topN: 2,
+      );
+
+      expect(mapping.topListened.map((track) => track.id), ['3', '2']);
+      expect(mapping.history.map((item) => item.track.id), ['3', '2']);
+      expect(mapping.stats.songCount, 4);
+      expect(mapping.stats.albumCount, 2);
+      expect(mapping.stats.artistCount, 2);
+      expect(mapping.stats.totalDurationMs, 406000);
+    },
+  );
+
+  test(
     'provider bridge composes derived lists and filters stats to existing tracks',
     () async {
       final snapshot = LibrarySnapshot(
