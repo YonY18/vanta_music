@@ -5,12 +5,15 @@ class LibraryIntelligenceReducer {
   const LibraryIntelligenceReducer();
 
   static const int continueListeningMinPositionMs = 15000;
+  static const int historyLimit = 100;
 
   LibrarySnapshot reduce(LibrarySnapshot previous, List<LibraryEvent> events) {
     final tracks = Map<String, LibraryTrackSnapshot>.from(previous.tracks);
+    final history = List<PlaybackHistoryEntry>.from(previous.history);
 
     for (final event in events) {
-      final current = tracks[event.trackKey] ??
+      final current =
+          tracks[event.trackKey] ??
           LibraryTrackSnapshot(
             trackKey: event.trackKey,
             playCount: 0,
@@ -34,14 +37,29 @@ class LibraryIntelligenceReducer {
           tracks[event.trackKey] = current.copyWith(
             lastPlayedAt: event.timestamp,
             durationMs: durationMs,
-            resumePositionMs: positionMs >= continueListeningMinPositionMs ? positionMs : 0,
+            resumePositionMs: positionMs >= continueListeningMinPositionMs
+                ? positionMs
+                : 0,
             isCompleted: false,
           );
         case LibraryEventType.playbackCompleted:
+          final listenedDurationMs =
+              event.listenedDurationMs ?? current.resumePositionMs;
+          final durationMs = event.durationMs ?? current.durationMs;
           tracks[event.trackKey] = current.copyWith(
             lastPlayedAt: event.timestamp,
+            durationMs: durationMs,
             resumePositionMs: 0,
             isCompleted: true,
+          );
+          history.insert(
+            0,
+            PlaybackHistoryEntry(
+              trackKey: event.trackKey,
+              listenedAt: event.timestamp,
+              listenedDurationMs: listenedDurationMs,
+              completed: event.completed ?? true,
+            ),
           );
         case LibraryEventType.favoriteToggled:
           tracks[event.trackKey] = current.copyWith(
@@ -52,6 +70,9 @@ class LibraryIntelligenceReducer {
       }
     }
 
-    return previous.copyWith(tracks: Map.unmodifiable(tracks));
+    return previous.copyWith(
+      tracks: Map.unmodifiable(tracks),
+      history: List.unmodifiable(history.take(historyLimit)),
+    );
   }
 }

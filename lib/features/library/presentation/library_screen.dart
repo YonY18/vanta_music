@@ -14,8 +14,10 @@ import '../application/library_providers.dart';
 import '../application/media_permission_service.dart';
 import '../application/permission_ux.dart';
 import '../../library_intelligence/application/library_intelligence_providers.dart';
+import '../../library_intelligence/domain/library_snapshot.dart';
 import '../domain/track.dart';
 import '../../playlists/application/playlists_controller.dart';
+import '../../playlists/domain/playlist.dart';
 import 'library_intelligence_sections.dart';
 import 'library_track_actions.dart';
 import 'library_track_favorites.dart';
@@ -379,6 +381,7 @@ class _HomeTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final stats = ref.watch(intelligenceStatsProvider);
     final intelligenceSections = buildVisibleIntelligenceSections(
       continueListening: ref
           .watch(intelligenceContinueListeningProvider)
@@ -401,6 +404,19 @@ class _HomeTab extends ConsumerWidget {
       builder: (deferArtwork) => CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+              child: _LibraryStatsCards(stats: stats),
+            ),
+          ),
+          if (intelligenceSections.isEmpty)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: _SmartLibraryEmptyStates(),
+              ),
+            ),
+          SliverToBoxAdapter(
             child: _HomeMockHeader(
               tracks: intelligenceSections.isEmpty
                   ? const []
@@ -412,13 +428,6 @@ class _HomeTab extends ConsumerWidget {
               },
             ),
           ),
-          if (intelligenceSections.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyState(
-                message: 'Todavía no hay actividad para mostrar en Inicio.',
-              ),
-            ),
           for (final sectionEntry in intelligenceSections.asMap().entries) ...[
             SliverToBoxAdapter(
               child: Padding(
@@ -478,6 +487,144 @@ class _HomeTab extends ConsumerWidget {
           ],
           const SliverToBoxAdapter(child: SizedBox(height: 88)),
         ],
+      ),
+    );
+  }
+}
+
+class _LibraryStatsCards extends StatelessWidget {
+  const _LibraryStatsCards({required this.stats});
+
+  final LibraryStatsSnapshot stats;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget stat(String label, String value) => Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle(title: 'Library stats'),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            stat('Songs', _plural(stats.songCount, 'song')),
+            stat('Albums', _plural(stats.albumCount, 'album')),
+          ],
+        ),
+        Row(
+          children: [
+            stat('Artists', _plural(stats.artistCount, 'artist')),
+            stat('Duration', _formatDuration(stats.totalDurationMs)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+String _plural(int count, String singular) {
+  final suffix = count == 1 ? singular : '${singular}s';
+  return '$count $suffix';
+}
+
+String _formatDuration(int totalDurationMs) {
+  final minutes = Duration(milliseconds: totalDurationMs).inMinutes;
+  if (minutes < 60) return '$minutes min';
+  final hours = minutes ~/ 60;
+  final remainingMinutes = minutes % 60;
+  if (remainingMinutes == 0) return '${hours}h';
+  return '${hours}h ${remainingMinutes}m';
+}
+
+class _SmartLibraryEmptyStates extends StatelessWidget {
+  const _SmartLibraryEmptyStates();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      children: [
+        _InfoCard(
+          icon: Icons.auto_awesome_rounded,
+          title: 'Smart library warming up',
+          message:
+              'Play local tracks to unlock recent, favorite, and most-played sections.',
+        ),
+        SizedBox(height: 8),
+        _InfoCard(
+          icon: Icons.cloud_sync_outlined,
+          title: 'Cloud sync coming soon',
+          message:
+              'Premium sync and AI library tools are planned, but local playback works today.',
+        ),
+      ],
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: VantaColors.violet.withValues(alpha: 0.14),
+              ),
+              child: Icon(icon, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: VantaColors.muted,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -931,9 +1078,17 @@ class _PlaylistsTab extends ConsumerWidget {
                 final playlist = items[index - 1];
                 return Card(
                   child: ListTile(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => _PlaylistDetailScreen(
+                          playlistId: playlist.id,
+                          initialName: playlist.name,
+                        ),
+                      ),
+                    ),
                     leading: const Icon(Icons.playlist_play_rounded),
                     title: Text(playlist.name),
-                    subtitle: Text('${playlist.tracks.length} canciones'),
+                    subtitle: Text(_plural(playlist.tracks.length, 'song')),
                   ),
                 );
               },
@@ -971,6 +1126,74 @@ class _PlaylistsTab extends ConsumerWidget {
     if (name == null || name.trim().isEmpty) return;
     await ref.read(playlistsControllerProvider.notifier).createPlaylist(name);
   }
+}
+
+class _PlaylistDetailScreen extends ConsumerWidget {
+  const _PlaylistDetailScreen({
+    required this.playlistId,
+    required this.initialName,
+  });
+
+  final String playlistId;
+  final String initialName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playlists = ref.watch(playlistsControllerProvider);
+    final playlist = _findPlaylist(playlists.valueOrNull, playlistId);
+
+    if (playlist == null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(initialName)),
+        body: const _EmptyState(message: 'No pude cargar esta playlist.'),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(playlist.name),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(28),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _plural(playlist.tracks.length, 'song'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
+      ),
+      body: playlist.tracks.isEmpty
+          ? const _EmptyState(
+              message: 'Esta playlist todavía no tiene canciones.',
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 104),
+              itemCount: playlist.tracks.length,
+              itemBuilder: (context, index) {
+                final track = playlist.tracks[index];
+                return Card(
+                  child: ListTile(
+                    onTap: () => ref
+                        .read(playerControllerProvider)
+                        .playTracks(playlist.tracks, index),
+                    leading: const Icon(Icons.music_note_rounded),
+                    title: Text(track.title),
+                    subtitle: Text('${track.artist} • ${track.album}'),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+Playlist? _findPlaylist(List<Playlist>? playlists, String playlistId) {
+  if (playlists == null) return null;
+  for (final playlist in playlists) {
+    if (playlist.id == playlistId) return playlist;
+  }
+  return null;
 }
 
 class _TrackTile extends ConsumerWidget {

@@ -48,6 +48,61 @@ class PlaylistsController extends AsyncNotifier<List<Playlist>> {
     await _save(updated);
   }
 
+  Future<void> renamePlaylistById({
+    required String playlistId,
+    required String name,
+  }) async {
+    final current = [...(state.valueOrNull ?? const <Playlist>[])];
+    final updated = current
+        .map(
+          (playlist) => playlist.id == playlistId
+              ? renamePlaylist(playlist, name)
+              : playlist,
+        )
+        .toList(growable: false);
+    await _save(updated);
+  }
+
+  Future<void> deletePlaylistById(String playlistId) async {
+    final current = [...(state.valueOrNull ?? const <Playlist>[])];
+    await _save(deletePlaylist(current, playlistId));
+  }
+
+  Future<void> removeTrackFromPlaylistById({
+    required String playlistId,
+    required String trackId,
+  }) async {
+    final current = [...(state.valueOrNull ?? const <Playlist>[])];
+    final updated = current
+        .map(
+          (playlist) => playlist.id == playlistId
+              ? removeTrackFromPlaylist(playlist, trackId)
+              : playlist,
+        )
+        .toList(growable: false);
+    await _save(updated);
+  }
+
+  Future<void> reorderTrackInPlaylist({
+    required String playlistId,
+    required int fromIndex,
+    required int toIndex,
+  }) async {
+    final current = [...(state.valueOrNull ?? const <Playlist>[])];
+    final updated = current
+        .map(
+          (playlist) => playlist.id == playlistId
+              ? reorderPlaylistTrack(
+                  playlist,
+                  fromIndex: fromIndex,
+                  toIndex: toIndex,
+                )
+              : playlist,
+        )
+        .toList(growable: false);
+    await _save(updated);
+  }
+
   Future<void> _save(List<Playlist> playlists) async {
     await ref.read(localPlaylistStoreProvider).savePlaylists(playlists);
     state = AsyncValue.data(playlists);
@@ -64,12 +119,58 @@ Playlist appendTrackToPlaylist(
   final alreadyExists = playlist.tracks.any((item) => item.id == track.id);
   if (alreadyExists) return playlist;
 
-  return Playlist(
-    id: playlist.id,
-    name: playlist.name,
-    description: playlist.description,
+  return playlist.copyWith(
     tracks: [...playlist.tracks, track],
-    createdAt: playlist.createdAt,
     updatedAt: now(),
   );
+}
+
+Playlist renamePlaylist(
+  Playlist playlist,
+  String name, {
+  DateTime Function() now = DateTime.now,
+}) {
+  final normalized = name.trim();
+  if (normalized.isEmpty || normalized == playlist.name) return playlist;
+
+  return playlist.copyWith(name: normalized, updatedAt: now());
+}
+
+List<Playlist> deletePlaylist(List<Playlist> playlists, String playlistId) {
+  return playlists
+      .where((playlist) => playlist.id != playlistId)
+      .toList(growable: false);
+}
+
+Playlist removeTrackFromPlaylist(
+  Playlist playlist,
+  String trackId, {
+  DateTime Function() now = DateTime.now,
+}) {
+  final tracks = playlist.tracks
+      .where((track) => track.id != trackId)
+      .toList(growable: false);
+  if (tracks.length == playlist.tracks.length) return playlist;
+
+  return playlist.copyWith(tracks: tracks, updatedAt: now());
+}
+
+Playlist reorderPlaylistTrack(
+  Playlist playlist, {
+  required int fromIndex,
+  required int toIndex,
+  DateTime Function() now = DateTime.now,
+}) {
+  final tracks = [...playlist.tracks];
+  if (fromIndex < 0 ||
+      fromIndex >= tracks.length ||
+      toIndex < 0 ||
+      toIndex >= tracks.length ||
+      fromIndex == toIndex) {
+    return playlist;
+  }
+
+  final track = tracks.removeAt(fromIndex);
+  tracks.insert(toIndex, track);
+  return playlist.copyWith(tracks: tracks, updatedAt: now());
 }

@@ -1,4 +1,9 @@
-enum LibraryEventType { playStarted, progressUpdated, playbackCompleted, favoriteToggled }
+enum LibraryEventType {
+  playStarted,
+  progressUpdated,
+  playbackCompleted,
+  favoriteToggled,
+}
 
 class LibraryEvent {
   const LibraryEvent._({
@@ -8,53 +13,56 @@ class LibraryEvent {
     this.positionMs,
     this.durationMs,
     this.isFavorite,
+    this.listenedDurationMs,
+    this.completed,
   });
 
   factory LibraryEvent.playStarted({
     required String trackKey,
     required DateTime timestamp,
-  }) =>
-      LibraryEvent._(
-        type: LibraryEventType.playStarted,
-        trackKey: trackKey,
-        timestamp: timestamp,
-      );
+  }) => LibraryEvent._(
+    type: LibraryEventType.playStarted,
+    trackKey: trackKey,
+    timestamp: timestamp,
+  );
 
   factory LibraryEvent.progressUpdated({
     required String trackKey,
     required int positionMs,
     required int durationMs,
     required DateTime timestamp,
-  }) =>
-      LibraryEvent._(
-        type: LibraryEventType.progressUpdated,
-        trackKey: trackKey,
-        positionMs: positionMs,
-        durationMs: durationMs,
-        timestamp: timestamp,
-      );
+  }) => LibraryEvent._(
+    type: LibraryEventType.progressUpdated,
+    trackKey: trackKey,
+    positionMs: positionMs,
+    durationMs: durationMs,
+    timestamp: timestamp,
+  );
 
   factory LibraryEvent.playbackCompleted({
     required String trackKey,
     required DateTime timestamp,
-  }) =>
-      LibraryEvent._(
-        type: LibraryEventType.playbackCompleted,
-        trackKey: trackKey,
-        timestamp: timestamp,
-      );
+    int? listenedDurationMs,
+    int? durationMs,
+  }) => LibraryEvent._(
+    type: LibraryEventType.playbackCompleted,
+    trackKey: trackKey,
+    timestamp: timestamp,
+    listenedDurationMs: listenedDurationMs,
+    durationMs: durationMs,
+    completed: true,
+  );
 
   factory LibraryEvent.favoriteToggled({
     required String trackKey,
     required bool isFavorite,
     required DateTime timestamp,
-  }) =>
-      LibraryEvent._(
-        type: LibraryEventType.favoriteToggled,
-        trackKey: trackKey,
-        isFavorite: isFavorite,
-        timestamp: timestamp,
-      );
+  }) => LibraryEvent._(
+    type: LibraryEventType.favoriteToggled,
+    trackKey: trackKey,
+    isFavorite: isFavorite,
+    timestamp: timestamp,
+  );
 
   final LibraryEventType type;
   final String trackKey;
@@ -62,6 +70,8 @@ class LibraryEvent {
   final int? positionMs;
   final int? durationMs;
   final bool? isFavorite;
+  final int? listenedDurationMs;
+  final bool? completed;
 
   Map<String, dynamic> toJson() {
     return {
@@ -71,6 +81,8 @@ class LibraryEvent {
       'positionMs': positionMs,
       'durationMs': durationMs,
       'isFavorite': isFavorite,
+      'listenedDurationMs': listenedDurationMs,
+      'completed': completed,
     };
   }
 
@@ -85,13 +97,19 @@ class LibraryEvent {
     }
     final trackKey = json['trackKey']?.toString();
     final timestamp = DateTime.tryParse((json['timestamp'] ?? '').toString());
-    if (type == null || trackKey == null || trackKey.isEmpty || timestamp == null) {
+    if (type == null ||
+        trackKey == null ||
+        trackKey.isEmpty ||
+        timestamp == null) {
       return null;
     }
 
     switch (type) {
       case LibraryEventType.playStarted:
-        return LibraryEvent.playStarted(trackKey: trackKey, timestamp: timestamp);
+        return LibraryEvent.playStarted(
+          trackKey: trackKey,
+          timestamp: timestamp,
+        );
       case LibraryEventType.progressUpdated:
         final positionMs = json['positionMs'];
         final durationMs = json['durationMs'];
@@ -103,7 +121,16 @@ class LibraryEvent {
           timestamp: timestamp,
         );
       case LibraryEventType.playbackCompleted:
-        return LibraryEvent.playbackCompleted(trackKey: trackKey, timestamp: timestamp);
+        final listenedDurationMs = json['listenedDurationMs'];
+        final durationMs = json['durationMs'];
+        return LibraryEvent.playbackCompleted(
+          trackKey: trackKey,
+          timestamp: timestamp,
+          listenedDurationMs: listenedDurationMs is int
+              ? listenedDurationMs
+              : null,
+          durationMs: durationMs is int ? durationMs : null,
+        );
       case LibraryEventType.favoriteToggled:
         final isFavorite = json['isFavorite'];
         if (isFavorite is! bool) return null;

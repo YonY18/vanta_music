@@ -65,6 +65,18 @@ final mostPlayedTracksProvider = Provider<List<Track>>((ref) {
   return mapping.mostPlayed;
 });
 
+final topListenedTracksProvider = Provider<List<Track>>((ref) {
+  final mapping = ref.watch(_libraryIntelligenceMappingProvider);
+  return mapping.topListened;
+});
+
+final playbackHistoryTracksProvider = Provider<List<PlaybackHistoryItem>>((
+  ref,
+) {
+  final mapping = ref.watch(_libraryIntelligenceMappingProvider);
+  return mapping.history;
+});
+
 final continueListeningTracksProvider = Provider<List<ContinueListeningItem>>((
   ref,
 ) {
@@ -131,9 +143,26 @@ LibraryIntelligenceMapping mapLibraryIntelligence({
       .take(topN)
       .toList(growable: false);
 
-  final visibleSnapshots = snapshot.tracks.values.where(
-    (item) => tracksByKey.containsKey(item.trackKey),
-  );
+  final visibleSnapshots = snapshot.tracks.values
+      .where((item) => tracksByKey.containsKey(item.trackKey))
+      .toList(growable: false);
+  final visibleTracks = tracks
+      .where((track) => snapshot.tracks.containsKey(_trackStableKey(track)))
+      .toList(growable: false);
+  final history = snapshot.history
+      .map((entry) {
+        final track = tracksByKey[entry.trackKey];
+        if (track == null) return null;
+        return PlaybackHistoryItem(
+          track: track,
+          listenedAt: entry.listenedAt,
+          listenedDurationMs: entry.listenedDurationMs,
+          completed: entry.completed,
+        );
+      })
+      .whereType<PlaybackHistoryItem>()
+      .take(topN)
+      .toList(growable: false);
   final stats = LibraryStatsSnapshot(
     totalTracked: visibleSnapshots.length,
     favoriteTracks: visibleSnapshots.where((item) => item.isFavorite).length,
@@ -142,13 +171,22 @@ LibraryIntelligenceMapping mapLibraryIntelligence({
       0,
       (sum, item) => sum + item.playCount,
     ),
+    songCount: visibleTracks.length,
+    albumCount: visibleTracks.map((track) => track.album).toSet().length,
+    artistCount: visibleTracks.map((track) => track.artist).toSet().length,
+    totalDurationMs: visibleTracks.fold(
+      0,
+      (sum, track) => sum + (track.duration?.inMilliseconds ?? 0),
+    ),
   );
 
   return LibraryIntelligenceMapping(
     favorites: favorites,
     recents: mapTracks(snapshot.recents),
     mostPlayed: mapTracks(snapshot.mostPlayed),
+    topListened: mapTracks(snapshot.mostPlayed),
     continueListening: continueListening,
+    history: history,
     stats: stats,
   );
 }
@@ -170,13 +208,31 @@ class LibraryIntelligenceMapping {
     required this.favorites,
     required this.recents,
     required this.mostPlayed,
+    required this.topListened,
     required this.continueListening,
+    required this.history,
     required this.stats,
   });
 
   final List<Track> favorites;
   final List<Track> recents;
   final List<Track> mostPlayed;
+  final List<Track> topListened;
   final List<ContinueListeningItem> continueListening;
+  final List<PlaybackHistoryItem> history;
   final LibraryStatsSnapshot stats;
+}
+
+class PlaybackHistoryItem {
+  const PlaybackHistoryItem({
+    required this.track,
+    required this.listenedAt,
+    required this.listenedDurationMs,
+    required this.completed,
+  });
+
+  final Track track;
+  final DateTime listenedAt;
+  final int listenedDurationMs;
+  final bool completed;
 }

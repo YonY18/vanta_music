@@ -1,0 +1,46 @@
+project: vanta_music
+initialized_at: 2026-05-24
+persistence_mode: hybrid
+strict_tdd: true
+context:
+  stack: Flutter + Dart (SDK ^3.12.0)
+  architecture: feature-first clean layering (app/features/shared)
+  state_management: flutter_riverpod
+  routing: go_router
+  persistence: drift/sqlite
+  audio: just_audio + audio_service
+testing:
+  runner:
+    command: flutter test
+    framework: flutter_test
+  layers:
+    unit:
+      available: true
+      tool: flutter_test
+    integration:
+      available: false
+      tool: "—"
+    e2e:
+      available: false
+      tool: "—"
+  coverage:
+    available: false
+    command: "—"
+  quality:
+    linter:
+      available: true
+      command: flutter analyze --no-fatal-infos --no-fatal-warnings
+    type_checker:
+      available: true
+      command: flutter analyze
+    formatter:
+      available: true
+      command: dart format .
+phases:
+  proposal: required
+  spec: required
+  design: required
+  tasks: required
+  apply: required
+  verify: required
+  archive: required
