@@ -1,13 +1,17 @@
+import '../../providers/domain/provider_identity.dart';
+
 class Album {
   const Album({
     required this.id,
     required this.title,
     required this.artist,
     required this.trackCount,
+    this.providerId = localProviderId,
     this.artworkId,
   });
 
   final String id;
+  final String providerId;
   final String title;
   final String artist;
   final int trackCount;

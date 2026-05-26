@@ -17,7 +17,10 @@ class VantaAudioHandler extends BaseAudioHandler
     this._sessionStore,
     InMemoryFileValidationCache? validationCache,
     this._intelligenceSink,
-  }) : _validationCache = validationCache ?? InMemoryFileValidationCache() {
+    StreamResolverRegistry? streamResolverRegistry,
+  }) : _validationCache = validationCache ?? InMemoryFileValidationCache(),
+       _streamResolverRegistry =
+           streamResolverRegistry ?? const LocalStreamResolverRegistry() {
     _eventSub = _player.playbackEventStream.listen(_broadcastState);
     _indexSub = _player.currentIndexStream.listen((index) {
       final items = queue.value;
@@ -32,6 +35,7 @@ class VantaAudioHandler extends BaseAudioHandler
   final PlaybackSessionStore? _sessionStore;
   final InMemoryFileValidationCache _validationCache;
   final LibraryIntelligenceSink? _intelligenceSink;
+  final StreamResolverRegistry _streamResolverRegistry;
   late final StreamSubscription<PlaybackEvent> _eventSub;
   late final StreamSubscription<int?> _indexSub;
 
@@ -56,9 +60,7 @@ class VantaAudioHandler extends BaseAudioHandler
     queue.add(safe.queue);
     mediaItem.add(safe.queue[safe.currentIndex]);
     await _player.setAudioSources(
-      safe.queue
-          .map((item) => AudioSource.uri(Uri.parse(item.id), tag: item))
-          .toList(growable: false),
+      await _audioSourcesFor(safe.queue),
       initialIndex: safe.currentIndex,
       initialPosition: safe.position,
     );
@@ -86,9 +88,7 @@ class VantaAudioHandler extends BaseAudioHandler
     mediaItem.add(items[initialIndex]);
 
     await _player.setAudioSources(
-      items
-          .map((item) => AudioSource.uri(Uri.parse(item.id), tag: item))
-          .toList(growable: false),
+      await _audioSourcesFor(items),
       initialIndex: initialIndex,
       initialPosition: Duration.zero,
     );
@@ -104,9 +104,7 @@ class VantaAudioHandler extends BaseAudioHandler
   Future<void> playMediaItem(MediaItem mediaItem) async {
     queue.add([mediaItem]);
     this.mediaItem.add(mediaItem);
-    await _player.setAudioSource(
-      AudioSource.uri(Uri.parse(mediaItem.id), tag: mediaItem),
-    );
+    await _player.setAudioSource(await _audioSourceFor(mediaItem));
     await play();
     _scheduleSessionPersist();
   }
@@ -153,10 +151,7 @@ class VantaAudioHandler extends BaseAudioHandler
     final insertIndex = _playNextIndex(items.length, currentIndex);
 
     queue.add(insertPlayNext(items, item, currentIndex: currentIndex));
-    await _player.insertAudioSource(
-      insertIndex,
-      AudioSource.uri(Uri.parse(item.id), tag: item),
-    );
+    await _player.insertAudioSource(insertIndex, await _audioSourceFor(item));
     _scheduleSessionPersist();
   }
 
@@ -164,9 +159,7 @@ class VantaAudioHandler extends BaseAudioHandler
   Future<void> addToQueueEnd(Track track) async {
     final item = mediaItemFromTrack(track);
     queue.add(appendToQueueEnd(queue.value, item));
-    await _player.addAudioSource(
-      AudioSource.uri(Uri.parse(item.id), tag: item),
-    );
+    await _player.addAudioSource(await _audioSourceFor(item));
     _scheduleSessionPersist();
   }
 
@@ -216,8 +209,24 @@ class VantaAudioHandler extends BaseAudioHandler
       extras: {
         'trackId': track.id,
         'providerId': track.providerId,
+        'canonicalUri': track.uri.toString(),
         'artworkId': track.artworkId,
       },
+    );
+  }
+
+  static Future<List<Uri>> resolveQueueItemUris(
+    List<MediaItem> items,
+    StreamResolverRegistry registry,
+  ) {
+    return Future.wait(
+      items.map((item) {
+        final providerId = item.extras?['providerId']?.toString();
+        if (providerId == null || providerId.isEmpty || providerId == 'local') {
+          return Future<Uri>.value(Uri.parse(item.id));
+        }
+        return registry.resolve(item);
+      }),
     );
   }
 
@@ -348,6 +357,21 @@ class VantaAudioHandler extends BaseAudioHandler
     });
   }
 
+  Future<List<AudioSource>> _audioSourcesFor(List<MediaItem> items) async {
+    final uris = await resolveQueueItemUris(items, _streamResolverRegistry);
+    return [
+      for (var index = 0; index < items.length; index++)
+        AudioSource.uri(uris[index], tag: items[index]),
+    ];
+  }
+
+  Future<AudioSource> _audioSourceFor(MediaItem item) async {
+    final uri = (await resolveQueueItemUris([
+      item,
+    ], _streamResolverRegistry)).single;
+    return AudioSource.uri(uri, tag: item);
+  }
+
   _SafeSessionResult? _safeSession(PlaybackSession session) {
     final pendingReconcileUris = <Uri>[];
     final cleanedQueue = session.queue
@@ -390,6 +414,17 @@ class VantaAudioHandler extends BaseAudioHandler
       ProcessingState.completed => AudioProcessingState.completed,
     };
   }
+}
+
+abstract class StreamResolverRegistry {
+  Future<Uri> resolve(MediaItem item);
+}
+
+class LocalStreamResolverRegistry implements StreamResolverRegistry {
+  const LocalStreamResolverRegistry();
+
+  @override
+  Future<Uri> resolve(MediaItem item) async => Uri.parse(item.id);
 }
 
 class _SafeSessionResult extends PlaybackSession {

@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../providers/domain/music_provider.dart';
 import '../../providers/infrastructure/local_music_provider.dart';
+import '../../providers/infrastructure/subsonic_api_client.dart';
+import '../../providers/infrastructure/subsonic_music_provider.dart';
+import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../../premium_metadata/domain/metadata_models.dart';
 import '../domain/album.dart';
@@ -27,6 +32,55 @@ final mediaPermissionServiceProvider = Provider(
 final localMusicProvider = Provider<MusicProvider>(
   (ref) => LocalMusicProvider(),
 );
+
+final activeRemoteMusicProvider = Provider<MusicProvider?>((ref) => null);
+
+typedef SubsonicApiClientFactory =
+    SubsonicApiClientContract Function({
+      required SubsonicServerConfig server,
+      required String password,
+    });
+
+final subsonicApiClientFactoryProvider = Provider<SubsonicApiClientFactory>(
+  (ref) =>
+      ({required server, required password}) =>
+          SubsonicApiClient(server: server, password: password),
+);
+
+final subsonicServerStoreProvider = FutureProvider<SubsonicServerStore>((
+  ref,
+) async {
+  final directory = await getApplicationSupportDirectory();
+  return SubsonicServerStore(
+    metadataStore: FileSubsonicServerMetadataStore(
+      File('${directory.path}/subsonic_servers.json'),
+    ),
+    secretStore: const FlutterSecureSubsonicSecretStore(),
+  );
+});
+
+final savedSubsonicMusicProvider = FutureProvider<MusicProvider?>((ref) async {
+  final store = await ref.watch(subsonicServerStoreProvider.future);
+  final activeServerId = await store.readActiveServer();
+  if (activeServerId == null) return null;
+
+  final servers = await store.loadServers();
+  final server = servers
+      .where((server) => server.id == activeServerId)
+      .firstOrNull;
+  if (server == null) return null;
+
+  final password = await store.readPassword(activeServerId);
+  if (password == null || password.isEmpty) return null;
+
+  return SubsonicMusicProvider(
+    server: server,
+    client: ref.watch(subsonicApiClientFactoryProvider)(
+      server: server,
+      password: password,
+    ),
+  );
+});
 
 final fileValidationCacheProvider = Provider<InMemoryFileValidationCache>(
   (ref) => InMemoryFileValidationCache(),
@@ -66,6 +120,41 @@ final filteredTracksProvider = Provider.family<List<Track>, String>((
 ) {
   final tracks = ref.watch(tracksProvider).valueOrNull ?? const <Track>[];
   return filterTracksForQuery(tracks, query);
+});
+
+final remoteLibraryTracksProvider = FutureProvider<List<Track>>((ref) async {
+  final provider =
+      ref.watch(activeRemoteMusicProvider) ??
+      await ref.watch(savedSubsonicMusicProvider.future);
+  if (provider == null) return const <Track>[];
+  return provider.getTracks();
+});
+
+final remoteLibrarySourceLabelProvider = Provider<String>((ref) {
+  return ref.watch(activeRemoteMusicProvider)?.name ??
+      ref.watch(savedSubsonicMusicProvider).valueOrNull?.name ??
+      'Remote library';
+});
+
+final filteredRemoteTracksProvider = Provider.family<List<Track>, String>((
+  ref,
+  query,
+) {
+  final tracks =
+      ref.watch(remoteLibraryTracksProvider).valueOrNull ?? const <Track>[];
+  return filterTracksForQuery(tracks, query);
+});
+
+final remoteSearchTracksProvider = FutureProvider.family<List<Track>, String>((
+  ref,
+  query,
+) async {
+  final provider = ref.watch(activeRemoteMusicProvider);
+  final normalized = query.trim();
+  final remoteProvider =
+      provider ?? await ref.watch(savedSubsonicMusicProvider.future);
+  if (remoteProvider == null || normalized.isEmpty) return const <Track>[];
+  return remoteProvider.search(normalized);
 });
 
 final libraryTrackDisplayMetadataProvider =

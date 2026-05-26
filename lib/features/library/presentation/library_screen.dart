@@ -13,6 +13,8 @@ import '../application/folder_library_controller.dart';
 import '../application/library_providers.dart';
 import '../application/media_permission_service.dart';
 import '../application/permission_ux.dart';
+import '../../providers/infrastructure/subsonic_api_client.dart';
+import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../../library_intelligence/application/library_intelligence_providers.dart';
 import '../../library_intelligence/domain/library_snapshot.dart';
 import '../domain/track.dart';
@@ -28,7 +30,7 @@ class LibraryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const _VantaAppTitle(),
@@ -50,12 +52,18 @@ class LibraryScreen extends ConsumerWidget {
             tabs: [
               Tab(text: 'Inicio'),
               Tab(text: 'Library'),
+              Tab(text: 'Remote'),
               Tab(text: 'Playlists'),
             ],
           ),
         ),
         body: const TabBarView(
-          children: [_HomeTab(), _LibraryTab(), _PlaylistsTab()],
+          children: [
+            _HomeTab(),
+            _LibraryTab(),
+            _RemoteLibraryTab(),
+            _PlaylistsTab(),
+          ],
         ),
         bottomNavigationBar: const MiniPlayer(),
       ),
@@ -1049,6 +1057,306 @@ class _CollectionTracksScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _RemoteLibraryTab extends ConsumerWidget {
+  const _RemoteLibraryTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tracks = ref.watch(remoteLibraryTracksProvider);
+    final sourceLabel = ref.watch(remoteLibrarySourceLabelProvider);
+
+    return tracks.when(
+      data: (items) {
+        if (items.isEmpty) {
+          return _EmptyState(
+            icon: Icons.cloud_queue_rounded,
+            message:
+                'Connect a Subsonic server to browse remote music separately from your local library.',
+            ctaLabel: 'Connect to Subsonic',
+            onCta: () => _showSubsonicConnectSheet(context, ref),
+          );
+        }
+
+        final favoriteTrackKeys = ref.watch(favoriteTrackKeysProvider);
+        final favoriteFlags = mapTrackFavoriteFlags(
+          tracks: items,
+          favoriteTrackKeys: favoriteTrackKeys,
+        );
+
+        return _ArtworkDeferredOnScroll(
+          builder: (deferArtwork) => CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Remote library',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(
+                              color: VantaColors.text,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.6,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        sourceLabel,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: VantaColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SliverList.builder(
+                itemCount: items.length,
+                itemBuilder: (context, index) => Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    index == items.length - 1 ? 104 : 8,
+                  ),
+                  child: _TrackTile(
+                    track: items[index],
+                    deferArtwork: deferArtwork,
+                    onTap: () => ref
+                        .read(playerControllerProvider)
+                        .playTracks(items, index),
+                    isFavorite: favoriteFlags[index],
+                    onToggleFavorite: () async {
+                      await ref
+                          .read(libraryIntelligenceControllerProvider)
+                          .toggleFavoriteForTrack(items[index]);
+                      ref.invalidate(libraryIntelligenceSnapshotProvider);
+                    },
+                    onAddToPlaylist: () => showAddToPlaylistSheet(
+                      context: context,
+                      ref: ref,
+                      track: items[index],
+                    ),
+                    onOpenActions: () => showTrackQuickActionsSheet(
+                      context: context,
+                      isFavorite: favoriteFlags[index],
+                      onToggleFavorite: () async {
+                        await ref
+                            .read(libraryIntelligenceControllerProvider)
+                            .toggleFavoriteForTrack(items[index]);
+                        ref.invalidate(libraryIntelligenceSnapshotProvider);
+                      },
+                      onAddToPlaylist: () => showAddToPlaylistSheet(
+                        context: context,
+                        ref: ref,
+                        track: items[index],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      error: (error, stack) => _EmptyState(
+        icon: Icons.cloud_off_rounded,
+        message: 'Remote library failed to load: $error',
+      ),
+      loading: () => const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  void _showSubsonicConnectSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _SubsonicConnectSheet(),
+    );
+  }
+}
+
+class _SubsonicConnectSheet extends ConsumerStatefulWidget {
+  const _SubsonicConnectSheet();
+
+  @override
+  ConsumerState<_SubsonicConnectSheet> createState() =>
+      _SubsonicConnectSheetState();
+}
+
+class _SubsonicConnectSheetState extends ConsumerState<_SubsonicConnectSheet> {
+  final _nameController = TextEditingController(text: 'Navidrome');
+  final _urlController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  bool _isConnecting = false;
+  String? _status;
+  bool _isError = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottomInset),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _SheetHeader(
+                title: 'Connect to Subsonic',
+                subtitle:
+                    'Works with Navidrome and Subsonic-compatible servers.',
+              ),
+              TextField(
+                controller: _nameController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Server name'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _urlController,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Server URL',
+                  hintText: 'https://music.example.com',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _usernameController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Username'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Password'),
+                onSubmitted: (_) => _connect(),
+              ),
+              if (_status != null) ...[
+                const SizedBox(height: 14),
+                Text(
+                  _status!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: _isError ? Colors.redAccent : VantaColors.muted,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: _isConnecting ? null : _connect,
+                icon: _isConnecting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_done_rounded),
+                label: Text(
+                  _isConnecting ? 'Connecting...' : 'Connect to Subsonic',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _connect() async {
+    final name = _nameController.text.trim();
+    final baseUrl = _urlController.text.trim();
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    if (name.isEmpty ||
+        baseUrl.isEmpty ||
+        username.isEmpty ||
+        password.isEmpty) {
+      setState(() {
+        _status = 'Complete server name, URL, username, and password.';
+        _isError = true;
+      });
+      return;
+    }
+
+    setState(() {
+      _isConnecting = true;
+      _status = 'Testing Subsonic connection...';
+      _isError = false;
+    });
+
+    try {
+      final config = SubsonicServerConfig(
+        id: _serverId(baseUrl, username),
+        name: name,
+        baseUrl: baseUrl,
+        username: username,
+      );
+      final client = ref.read(subsonicApiClientFactoryProvider)(
+        server: config,
+        password: password,
+      );
+      await client.ping();
+
+      final store = await ref.read(subsonicServerStoreProvider.future);
+      await store.saveServer(config, password: password);
+      await store.selectActiveServer(config.normalized().id);
+      ref.invalidate(savedSubsonicMusicProvider);
+      ref.invalidate(remoteLibraryTracksProvider);
+
+      if (!mounted) return;
+      setState(() {
+        _isConnecting = false;
+        _status = 'Connected. Loading remote library...';
+        _isError = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Subsonic server connected.')),
+      );
+      Navigator.of(context).pop();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isConnecting = false;
+        _status = 'Connection failed: ${_safeSubsonicError(error)}';
+        _isError = true;
+      });
+    }
+  }
+}
+
+String _serverId(String baseUrl, String username) {
+  final uri = Uri.parse(baseUrl.trim());
+  final host = uri.host.isEmpty ? 'server' : uri.host;
+  final raw = '$host-${username.trim()}'.toLowerCase();
+  final safe = raw.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+  return safe.replaceAll(RegExp(r'^-+|-+$'), '');
+}
+
+String _safeSubsonicError(Object error) {
+  if (error is SubsonicFailure) return error.message;
+  if (error is ArgumentError) {
+    return error.message?.toString() ?? 'Invalid server settings.';
+  }
+  return 'Unable to connect to the server.';
 }
 
 class _PlaylistsTab extends ConsumerWidget {

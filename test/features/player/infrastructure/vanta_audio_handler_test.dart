@@ -55,19 +55,70 @@ void main() {
       expect(result.extras, containsPair('trackId', '42'));
       expect(result.extras, containsPair('providerId', 'local'));
     });
+
+    test(
+      'resolves remote queue items at playback time while keeping canonical media ids',
+      () async {
+        final local = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.mp3'),
+        );
+        final remote = VantaAudioHandler.mediaItemFromTrack(
+          _track(
+            'subsonic:server-a:remote-1',
+            'subsonic://track?serverId=server-a&id=remote-1',
+            providerId: 'subsonic:server-a',
+          ),
+        );
+        final registry = _FakeStreamResolverRegistry({
+          'subsonic:server-a::subsonic:server-a:remote-1': Uri.parse(
+            'https://music.example/rest/stream.view?id=remote-1&t=secret-token',
+          ),
+        });
+
+        final sources = await VantaAudioHandler.resolveQueueItemUris([
+          local,
+          remote,
+        ], registry);
+
+        expect(sources, [
+          Uri.parse('file:///queue/local.mp3'),
+          Uri.parse(
+            'https://music.example/rest/stream.view?id=remote-1&t=secret-token',
+          ),
+        ]);
+        expect(remote.id, 'subsonic://track?serverId=server-a&id=remote-1');
+        expect(registry.requests, [
+          'subsonic:server-a::subsonic:server-a:remote-1',
+        ]);
+      },
+    );
   });
 }
 
 MediaItem _item(String id) => MediaItem(id: id, title: 'Track $id');
 
-Track _track(String id, String uri) {
+Track _track(String id, String uri, {String providerId = 'local'}) {
   return Track(
     id: id,
-    providerId: 'local',
+    providerId: providerId,
     title: 'Track $id',
     artist: 'Artist',
     album: 'Album',
     uri: Uri.parse(uri),
     duration: const Duration(minutes: 3),
   );
+}
+
+class _FakeStreamResolverRegistry implements StreamResolverRegistry {
+  _FakeStreamResolverRegistry(this._resolved);
+
+  final Map<String, Uri> _resolved;
+  final List<String> requests = [];
+
+  @override
+  Future<Uri> resolve(MediaItem item) async {
+    final key = VantaAudioHandler.normalizeTrackKey(item)!;
+    requests.add(key);
+    return _resolved[key] ?? Uri.parse(item.id);
+  }
 }
