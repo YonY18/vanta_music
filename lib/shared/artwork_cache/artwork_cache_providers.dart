@@ -17,11 +17,16 @@ final artworkBytesSourceProvider = Provider<ArtworkBytesSource>(
   (ref) => OnAudioQueryArtworkBytesSource(),
 );
 
+final remoteArtworkBytesSourceProvider = Provider<RemoteArtworkBytesSource>(
+  (ref) => HttpRemoteArtworkBytesSource(),
+);
+
 final artworkCacheResolverProvider = Provider<ArtworkCacheResolver>((ref) {
   return ArtworkCacheResolver(
     store: ref.watch(artworkCacheStoreProvider),
     source: ref.watch(artworkBytesSourceProvider),
     embeddedSource: ref.watch(embeddedArtworkBytesSourceProvider),
+    remoteSource: ref.watch(remoteArtworkBytesSourceProvider),
   );
 });
 

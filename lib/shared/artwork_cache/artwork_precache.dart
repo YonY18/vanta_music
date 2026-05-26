@@ -15,7 +15,12 @@ List<Track> selectTracksForArtworkPrecache(
   for (final track in tracks) {
     final canResolveFromArtworkId = track.artworkId != null;
     final canResolveFromEmbedded = track.uri.isScheme('file');
-    if (!canResolveFromArtworkId && !canResolveFromEmbedded) continue;
+    final canResolveFromRemote = hasRemoteArtwork(track);
+    if (!canResolveFromArtworkId &&
+        !canResolveFromEmbedded &&
+        !canResolveFromRemote) {
+      continue;
+    }
 
     selected.add(track);
     if (selected.length >= maxCount) break;

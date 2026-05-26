@@ -21,6 +21,34 @@ void main() {
 
       expect(selected.map((track) => track.id).toList(), ['1', '3']);
     });
+
+    test('includes remote Subsonic cover art while preserving bounded order', () {
+      final tracks = [
+        _track(
+          'local-unsupported',
+          artworkId: null,
+          uri: Uri.parse('content://song/1'),
+        ),
+        _remoteTrack('remote-1', coverArtId: 'cover-1'),
+        _remoteTrack(
+          'remote-2',
+          coverArtUri:
+              'https://music.example/rest/getCoverArt.view?id=cover-2&t=secret-token',
+        ),
+        _track(
+          'local-file',
+          artworkId: null,
+          uri: Uri.file('/music/local.mp3'),
+        ),
+      ];
+
+      final selected = selectTracksForArtworkPrecache(tracks, maxCount: 2);
+
+      expect(selected.map((track) => track.id).toList(), [
+        'subsonic:server-1:remote-1',
+        'subsonic:server-1:remote-2',
+      ]);
+    });
   });
 
   group('ArtworkCacheWarmupService', () {
@@ -65,6 +93,25 @@ void main() {
       expect(resolver.maxConcurrentCalls, lessThanOrEqualTo(2));
     });
   });
+}
+
+Track _remoteTrack(String id, {String? coverArtId, String? coverArtUri}) {
+  final queryParameters = <String, String>{'serverId': 'server-1', 'id': id};
+  if (coverArtId != null) queryParameters['coverArtId'] = coverArtId;
+  if (coverArtUri != null) queryParameters['coverArtUri'] = coverArtUri;
+
+  return Track(
+    id: 'subsonic:server-1:$id',
+    providerId: 'subsonic:server-1',
+    title: 'Remote Song $id',
+    artist: 'Remote Artist',
+    album: 'Remote Album',
+    uri: Uri(
+      scheme: 'subsonic',
+      host: 'track',
+      queryParameters: queryParameters,
+    ),
+  );
 }
 
 Track _track(String id, {required int? artworkId, required Uri uri}) {

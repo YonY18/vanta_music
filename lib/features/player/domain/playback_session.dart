@@ -44,13 +44,14 @@ class PlaybackSession {
   }
 
   static Map<String, dynamic> _mediaItemToJson(MediaItem item) {
+    final safeId = _safeMediaId(item);
     return {
-      'id': item.id,
+      'id': safeId,
       'title': item.title,
       'artist': item.artist,
       'album': item.album,
       'durationMs': item.duration?.inMilliseconds,
-      'extras': item.extras,
+      'extras': _safeExtras(item.extras, safeId),
     };
   }
 
@@ -70,5 +71,59 @@ class PlaybackSession {
           ? Map<String, dynamic>.from(json['extras'] as Map)
           : null,
     );
+  }
+
+  static String _safeMediaId(MediaItem item) {
+    final canonicalUri = item.extras?['canonicalUri']?.toString();
+    if (_isRemoteProvider(item.extras) && canonicalUri?.isNotEmpty == true) {
+      return canonicalUri!;
+    }
+    return item.id;
+  }
+
+  static Map<String, dynamic>? _safeExtras(
+    Map<String, dynamic>? extras,
+    String safeId,
+  ) {
+    if (extras == null) return null;
+    final safe = <String, dynamic>{};
+    for (final entry in extras.entries) {
+      if (_isSensitiveExtraKey(entry.key)) continue;
+      final value = entry.value;
+      if (value is Uri && _isAuthBearingUri(value)) continue;
+      if (value is String && _isAuthBearingUriString(value)) continue;
+      safe[entry.key] = value;
+    }
+    if (_isRemoteProvider(extras)) {
+      safe['canonicalUri'] = safeId;
+    }
+    return safe;
+  }
+
+  static bool _isRemoteProvider(Map<String, dynamic>? extras) {
+    final providerId = extras?['providerId']?.toString() ?? '';
+    return providerId.isNotEmpty && providerId != 'local';
+  }
+
+  static bool _isSensitiveExtraKey(String key) {
+    final normalized = key.toLowerCase();
+    return normalized.contains('stream') ||
+        normalized.contains('token') ||
+        normalized.contains('password');
+  }
+
+  static bool _isAuthBearingUriString(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null && _isAuthBearingUri(uri);
+  }
+
+  static bool _isAuthBearingUri(Uri uri) {
+    final keys = uri.queryParameters.keys.map((key) => key.toLowerCase());
+    return uri.scheme.startsWith('http') &&
+        (keys.contains('t') ||
+            keys.contains('s') ||
+            keys.contains('u') ||
+            keys.contains('token') ||
+            keys.contains('password'));
   }
 }

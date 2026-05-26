@@ -37,4 +37,48 @@ void main() {
 
     expect(restored, isNull);
   });
+
+  test(
+    'persists canonical remote identity instead of auth-bearing stream URLs',
+    () {
+      const item = MediaItem(
+        id: 'https://music.example/rest/stream.view?id=remote-1&t=secret-token&s=salt&u=user',
+        title: 'Remote Song',
+        artist: 'Remote Artist',
+        album: 'Remote Album',
+        extras: {
+          'trackId': 'subsonic:server-a:remote-1',
+          'providerId': 'subsonic:server-a',
+          'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+          'resolvedStreamUrl':
+              'https://music.example/rest/stream.view?id=remote-1&t=secret-token',
+        },
+      );
+      final session = PlaybackSession(
+        queue: const [item],
+        currentIndex: 0,
+        position: Duration.zero,
+      );
+
+      final json = session.toJson();
+      final serialized = json.toString();
+      final restored = PlaybackSession.fromJson(json);
+
+      expect(serialized, isNot(contains('secret-token')));
+      expect(serialized, isNot(contains('stream.view')));
+      expect(restored, isNotNull);
+      expect(
+        restored!.queue.single.id,
+        'subsonic://track?serverId=server-a&id=remote-1',
+      );
+      expect(
+        restored.queue.single.extras,
+        containsPair('providerId', 'subsonic:server-a'),
+      );
+      expect(
+        restored.queue.single.extras,
+        isNot(contains('resolvedStreamUrl')),
+      );
+    },
+  );
 }

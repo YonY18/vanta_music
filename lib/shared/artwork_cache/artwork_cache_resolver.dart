@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:on_audio_query/on_audio_query.dart';
+import 'package:http/http.dart' as http;
 
 import '../../features/library/domain/track.dart';
 import '../../features/premium_metadata/domain/metadata_models.dart';
@@ -13,6 +14,10 @@ abstract class ArtworkBytesSource {
 }
 
 abstract class EmbeddedArtworkBytesSource {
+  Future<Uint8List?> fetch({required Uri uri, required int sizePx});
+}
+
+abstract class RemoteArtworkBytesSource {
   Future<Uint8List?> fetch({required Uri uri, required int sizePx});
 }
 
@@ -33,16 +38,34 @@ class OnAudioQueryArtworkBytesSource implements ArtworkBytesSource {
   }
 }
 
+class HttpRemoteArtworkBytesSource implements RemoteArtworkBytesSource {
+  HttpRemoteArtworkBytesSource({http.Client? client})
+    : _client = client ?? http.Client();
+
+  final http.Client _client;
+
+  @override
+  Future<Uint8List?> fetch({required Uri uri, required int sizePx}) async {
+    if (!uri.isScheme('http') && !uri.isScheme('https')) return null;
+
+    final response = await _client.get(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) return null;
+    return response.bodyBytes.isEmpty ? null : response.bodyBytes;
+  }
+}
+
 class ArtworkCacheResolver {
   ArtworkCacheResolver({
     required this.store,
     required this.source,
     required this.embeddedSource,
+    this.remoteSource,
   });
 
   final ArtworkCacheStore store;
   final ArtworkBytesSource source;
   final EmbeddedArtworkBytesSource embeddedSource;
+  final RemoteArtworkBytesSource? remoteSource;
   final Set<String> _memoizedMisses = <String>{};
 
   Future<String?> resolvePath({
@@ -58,12 +81,16 @@ class ArtworkCacheResolver {
   }) async {
     final artworkId = track.artworkId;
 
+    final remoteArtworkUri = remoteArtworkUriForTrack(track);
     final key = buildArtworkCacheKey(
       providerId: track.providerId,
       trackId: track.id,
       artworkId: artworkId,
       sizePx: sizePx,
-      sourceUri: track.uri.toString(),
+      sourceUri: _cacheSourceUri(
+        track: track,
+        remoteArtworkUri: remoteArtworkUri,
+      ),
     );
     final rawKey = key.raw;
 
@@ -111,6 +138,25 @@ class ArtworkCacheResolver {
       }
     }
 
+    if ((bytes == null || bytes.isEmpty) &&
+        remoteArtworkUri != null &&
+        remoteSource != null) {
+      try {
+        bytes = await remoteSource!.fetch(
+          uri: remoteArtworkUri,
+          sizePx: sizePx,
+        );
+        _debugLog(
+          track,
+          bytes == null || bytes.isEmpty
+              ? 'remote miss uri=$remoteArtworkUri'
+              : 'remote hit uri=$remoteArtworkUri bytes=${bytes.length}',
+        );
+      } catch (error) {
+        _debugLog(track, 'remote error uri=$remoteArtworkUri error=$error');
+      }
+    }
+
     if (bytes == null || bytes.isEmpty) {
       _debugLog(track, 'final miss');
       _memoizedMisses.add(rawKey);
@@ -138,4 +184,39 @@ class ArtworkCacheResolver {
       'artworkId=${track.artworkId} uri=${track.uri}',
     );
   }
+}
+
+Uri? remoteArtworkUriForTrack(Track track) {
+  if (!track.uri.isScheme('subsonic')) return null;
+
+  final explicitUri = track.uri.queryParameters['coverArtUri'];
+  if (explicitUri != null && explicitUri.isNotEmpty) {
+    return Uri.tryParse(explicitUri);
+  }
+
+  final coverArtId = track.uri.queryParameters['coverArtId'];
+  if (coverArtId == null || coverArtId.isEmpty) return null;
+
+  return Uri(
+    scheme: 'subsonic',
+    host: 'cover-art',
+    queryParameters: <String, String>{
+      if (track.uri.queryParameters['serverId'] != null)
+        'serverId': track.uri.queryParameters['serverId']!,
+      'id': coverArtId,
+    },
+  );
+}
+
+bool hasRemoteArtwork(Track track) => remoteArtworkUriForTrack(track) != null;
+
+String _cacheSourceUri({required Track track, required Uri? remoteArtworkUri}) {
+  if (remoteArtworkUri == null) return track.uri.toString();
+
+  final coverArtId = remoteArtworkUri.queryParameters['id'];
+  if (coverArtId != null && coverArtId.isNotEmpty) {
+    return 'remote-cover:${track.providerId}:$coverArtId';
+  }
+
+  return sanitizeArtworkUri(remoteArtworkUri).toString();
 }

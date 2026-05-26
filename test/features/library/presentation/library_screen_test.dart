@@ -13,6 +13,8 @@ import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dar
 import 'package:vanta_music/features/playlists/application/playlists_controller.dart';
 import 'package:vanta_music/features/playlists/domain/playlist.dart';
 import 'package:vanta_music/features/playlists/infrastructure/local_playlist_store.dart';
+import 'package:vanta_music/features/providers/infrastructure/subsonic_api_client.dart';
+import 'package:vanta_music/features/providers/infrastructure/subsonic_server_store.dart';
 
 void main() {
   testWidgets('renders bounded local stats cards on the home tab', (
@@ -132,11 +134,115 @@ void main() {
     expect(find.text('1 album'), findsOneWidget);
     expect(find.text('1 artist'), findsOneWidget);
   });
+
+  testWidgets(
+    'renders remote library in a separate surface from local home sections',
+    (tester) async {
+      final localTrack = _track('1', title: 'Local Only');
+      final remoteTrack = _track(
+        'remote-1',
+        title: 'Remote Only',
+        providerId: 'subsonic:server-a',
+        uri: Uri.parse('subsonic://track?serverId=server-a&id=remote-1'),
+      );
+
+      await tester.pumpLibraryScreen(
+        tracks: [localTrack],
+        remoteTracks: [remoteTrack],
+        snapshot: LibrarySnapshot(
+          schemaVersion: 1,
+          tracks: {'local::1': _snapshot('local::1', playCount: 4)},
+        ),
+      );
+
+      expect(find.text('Remote Only'), findsNothing);
+      expect(find.text('Local Only'), findsWidgets);
+
+      await tester.tap(find.widgetWithText(Tab, 'Remote'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Remote library'), findsOneWidget);
+      expect(find.text('Navidrome'), findsOneWidget);
+      expect(find.text('Remote Only'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'connects and saves a Subsonic server from the remote empty state',
+    (tester) async {
+      final metadataStore = _MemorySubsonicMetadataStore();
+      final secretStore = InMemorySubsonicSecretStore();
+      final serverStore = SubsonicServerStore(
+        metadataStore: metadataStore,
+        secretStore: secretStore,
+      );
+      final client = _ControlledSubsonicApiClient();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tracksProvider.overrideWith((ref) async => const <Track>[]),
+            subsonicServerStoreProvider.overrideWith(
+              (ref) async => serverStore,
+            ),
+            subsonicApiClientFactoryProvider.overrideWithValue(({
+              required server,
+              required password,
+            }) {
+              client.server = server;
+              client.password = password;
+              return client;
+            }),
+            libraryIntelligenceSnapshotProvider.overrideWith(
+              (ref) async => const LibrarySnapshot.empty(),
+            ),
+            localPlaylistStoreProvider.overrideWithValue(
+              _MemoryPlaylistStore(),
+            ),
+          ],
+          child: const MaterialApp(home: LibraryScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(Tab, 'Remote'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect to Subsonic'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'Home Navidrome');
+      await tester.enterText(fields.at(1), 'https://music.example.com/');
+      await tester.enterText(fields.at(2), 'alice');
+      await tester.enterText(fields.at(3), 'secret-password');
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Connect to Subsonic').last,
+      );
+      await tester.pump();
+
+      expect(find.text('Testing Subsonic connection...'), findsOneWidget);
+      expect(client.pingCalled, isTrue);
+
+      client.completePing();
+      await tester.pumpAndSettle();
+
+      final state = await metadataStore.read();
+      expect(state.activeServerId, 'music-example-com-alice');
+      expect(state.servers.single.name, 'Home Navidrome');
+      expect(state.servers.single.baseUrl, 'https://music.example.com');
+      expect(
+        await secretStore.readPassword('music-example-com-alice'),
+        'secret-password',
+      );
+      expect(find.text('Subsonic server connected.'), findsOneWidget);
+    },
+  );
 }
 
 extension on WidgetTester {
   Future<void> pumpLibraryScreen({
     List<Track> tracks = const [],
+    List<Track> remoteTracks = const [],
     LibrarySnapshot snapshot = const LibrarySnapshot.empty(),
     List<Playlist> playlists = const [],
     MetadataOverrideStore? overrideStore,
@@ -146,6 +252,8 @@ extension on WidgetTester {
       ProviderScope(
         overrides: [
           tracksProvider.overrideWith((ref) async => tracks),
+          remoteLibraryTracksProvider.overrideWith((ref) async => remoteTracks),
+          remoteLibrarySourceLabelProvider.overrideWithValue('Navidrome'),
           libraryIntelligenceSnapshotProvider.overrideWith(
             (ref) async => snapshot,
           ),
@@ -172,14 +280,16 @@ Track _track(
   String album = 'Album',
   String artist = 'Artist',
   int durationSeconds = 120,
+  String providerId = 'local',
+  Uri? uri,
 }) {
   return Track(
     id: id,
-    providerId: 'local',
+    providerId: providerId,
     title: title ?? 'Song $id',
     artist: artist,
     album: album,
-    uri: Uri.parse('content://song/$id'),
+    uri: uri ?? Uri.parse('content://song/$id'),
     duration: Duration(seconds: durationSeconds),
   );
 }
@@ -198,7 +308,7 @@ LibraryTrackSnapshot _snapshot(String trackKey, {required int playCount}) {
 }
 
 class _MemoryPlaylistStore extends LocalPlaylistStore {
-  _MemoryPlaylistStore(this._playlists);
+  _MemoryPlaylistStore([this._playlists = const []]);
 
   List<Playlist> _playlists;
 
@@ -243,4 +353,57 @@ class _ControlledMetadataOverrideStore implements MetadataOverrideStore {
 
   @override
   Future<void> clearOverride(String trackKey) async {}
+}
+
+class _MemorySubsonicMetadataStore implements SubsonicServerMetadataStore {
+  SubsonicServerState _state = const SubsonicServerState();
+
+  @override
+  Future<SubsonicServerState> read() async => _state;
+
+  @override
+  Future<void> write(SubsonicServerState state) async {
+    _state = state;
+  }
+}
+
+class _ControlledSubsonicApiClient implements SubsonicApiClientContract {
+  final Completer<void> _pingCompleter = Completer<void>();
+
+  SubsonicServerConfig? server;
+  String? password;
+  bool pingCalled = false;
+
+  void completePing() => _pingCompleter.complete();
+
+  @override
+  Future<void> ping() {
+    pingCalled = true;
+    return _pingCompleter.future;
+  }
+
+  @override
+  Future<List<SubsonicArtist>> getArtists() async => const [];
+
+  @override
+  Future<List<SubsonicAlbum>> getAlbumList2({
+    String type = 'alphabeticalByName',
+  }) async => const [];
+
+  @override
+  Future<SubsonicAlbumDetail> getAlbum(String id) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<SubsonicSong> getSong(String id) async => throw UnimplementedError();
+
+  @override
+  Future<List<SubsonicSong>> search3(String query) async => const [];
+
+  @override
+  Uri streamUri(String songId) => Uri.parse('https://music.example.com/stream');
+
+  @override
+  Uri getCoverArtUri(String coverArtId) =>
+      Uri.parse('https://music.example.com/cover');
 }
