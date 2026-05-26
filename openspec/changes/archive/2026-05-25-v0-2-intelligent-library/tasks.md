@@ -46,5 +46,5 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: Verification / Cleanup
 
-- [ ] 4.1 Run `flutter test` and fix regressions in touched feature tests before merging each work unit.
-- [ ] 4.2 Run `flutter analyze --no-fatal-infos --no-fatal-warnings`; apply minimal cleanup in modified files only (no redesign, no Drift migration, no external providers).
+- [x] 4.1 Run `flutter test` and fix regressions in touched feature tests before merging each work unit.
+- [x] 4.2 Run `flutter analyze --no-fatal-infos --no-fatal-warnings`; apply minimal cleanup in modified files only (no redesign, no Drift migration, no external providers).

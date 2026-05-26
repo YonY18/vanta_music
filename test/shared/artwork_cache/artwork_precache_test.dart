@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -52,7 +51,9 @@ void main() {
     });
 
     test('respects maxConcurrency', () async {
-      final resolver = _TrackingResolver(delay: const Duration(milliseconds: 15));
+      final resolver = _TrackingResolver(
+        delay: const Duration(milliseconds: 15),
+      );
       final service = ArtworkCacheWarmupService(resolver: resolver);
 
       await service.warmup([
@@ -93,7 +94,10 @@ class _TrackingResolver extends ArtworkCacheResolver {
   int maxConcurrentCalls = 0;
 
   @override
-  Future<String?> resolvePath({required Track track, required int sizePx}) async {
+  Future<String?> resolvePath({
+    required Track track,
+    required int sizePx,
+  }) async {
     calledTrackIds.add(track.id);
     _activeCalls += 1;
     if (_activeCalls > maxConcurrentCalls) {
@@ -121,7 +125,10 @@ class _NoopStore implements ArtworkCacheStore {
 
 class _NoopSource implements ArtworkBytesSource {
   @override
-  Future<Uint8List?> fetch({required int artworkId, required int sizePx}) async {
+  Future<Uint8List?> fetch({
+    required int artworkId,
+    required int sizePx,
+  }) async {
     return null;
   }
 }

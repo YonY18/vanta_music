@@ -14,12 +14,10 @@ class VantaAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler
     implements PlayerAudioControl {
   VantaAudioHandler({
-    PlaybackSessionStore? sessionStore,
+    this._sessionStore,
     InMemoryFileValidationCache? validationCache,
-    LibraryIntelligenceSink? intelligenceSink,
-  }) : _sessionStore = sessionStore,
-       _validationCache = validationCache ?? InMemoryFileValidationCache(),
-       _intelligenceSink = intelligenceSink {
+    this._intelligenceSink,
+  }) : _validationCache = validationCache ?? InMemoryFileValidationCache() {
     _eventSub = _player.playbackEventStream.listen(_broadcastState);
     _indexSub = _player.currentIndexStream.listen((index) {
       final items = queue.value;

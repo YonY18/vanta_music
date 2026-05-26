@@ -10,9 +10,13 @@ class LibraryIntelligenceController {
     required LibraryIntelligenceStore store,
     required LibraryIntelligenceReducer reducer,
     IntelligenceNow? now,
-  }) : _store = store,
-       _reducer = reducer,
-       _now = now ?? DateTime.now;
+  }) : this._(store: store, reducer: reducer, now: now ?? DateTime.now);
+
+  LibraryIntelligenceController._({
+    required this._store,
+    required this._reducer,
+    required this._now,
+  });
 
   final LibraryIntelligenceStore _store;
   final LibraryIntelligenceReducer _reducer;
