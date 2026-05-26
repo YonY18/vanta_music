@@ -1,4 +1,4 @@
-name: Android beta APK
+name: Android APK Release
 
 on:
   push:
@@ -14,12 +14,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: android-beta-${{ github.ref }}
+  group: android-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  android-beta:
-    name: Build Android beta APK
+  android-release:
+    name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -95,30 +95,21 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Prepare APK package
-        id: package_apk
+      - name: Rename APK
         shell: bash
         run: |
-          mkdir -p dist
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/VantaMusic-${{ github.ref_name }}.apk
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            apk_name="vanta-music-${GITHUB_REF_NAME}.apk"
-          else
-            apk_name="vanta-music-beta-${GITHUB_RUN_NUMBER}.apk"
-          fi
-
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/${apk_name}"
-          echo "apk_path=dist/${apk_name}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload beta APK artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vanta-music-beta-apk
-          path: ${{ steps.package_apk.outputs.apk_path }}
+          name: VantaMusic-${{ github.ref_name }}
+          path: build/app/outputs/flutter-apk/VantaMusic-${{ github.ref_name }}.apk
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish beta GitHub Release
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
@@ -132,4 +123,5 @@ jobs:
             Download the APK attached to this prerelease and install it on an Android device for internal testing.
 
             This build is intended for beta validation, not public store distribution.
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/VantaMusic-${{ github.ref_name }}.apk
+          
