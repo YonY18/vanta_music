@@ -7,6 +7,13 @@ TrackArtworkRequest? trackArtworkRequestFromMediaItem({
   required MediaItem item,
   required int sizePx,
 }) {
+  final track = trackFromMediaItem(item);
+  if (track == null) return null;
+
+  return TrackArtworkRequest(track: track, sizePx: sizePx);
+}
+
+Track? trackFromMediaItem(MediaItem item) {
   final providerId = item.extras?['providerId']?.toString();
   final trackIdFromExtras = item.extras?['trackId']?.toString();
   final trackId = _asTrackIdFromUri(trackIdFromExtras, item.id);
@@ -19,7 +26,7 @@ TrackArtworkRequest? trackArtworkRequestFromMediaItem({
   final uri = _safeUri(item.id);
   if (uri == null) return null;
 
-  final track = Track(
+  return Track(
     id: trackId,
     providerId: providerId,
     title: item.title,
@@ -29,12 +36,12 @@ TrackArtworkRequest? trackArtworkRequestFromMediaItem({
     duration: item.duration,
     artworkId: artworkId,
   );
-
-  return TrackArtworkRequest(track: track, sizePx: sizePx);
 }
 
 String? _asTrackIdFromUri(String? trackIdFromExtras, String itemId) {
-  if (trackIdFromExtras != null && trackIdFromExtras.isNotEmpty) return trackIdFromExtras;
+  if (trackIdFromExtras != null && trackIdFromExtras.isNotEmpty) {
+    return trackIdFromExtras;
+  }
   return itemId.isEmpty ? null : itemId;
 }
 

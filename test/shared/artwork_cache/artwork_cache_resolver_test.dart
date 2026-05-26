@@ -77,6 +77,47 @@ void main() {
     expect(store.writes, 1);
     expect(store.writtenBytes, [5, 6, 7]);
   });
+
+  test('returns typed cached hit outcome without calling sources', () async {
+    final store = _FakeStore(readPathValue: '/tmp/cached.jpg');
+    final source = _FakeSource(result: Uint8List.fromList([1, 2, 3]));
+    final embedded = _FakeEmbeddedSource(result: Uint8List.fromList([4, 5]));
+    final resolver = ArtworkCacheResolver(
+      store: store,
+      source: source,
+      embeddedSource: embedded,
+    );
+
+    final resolution = await resolver.resolve(track: track, sizePx: 160);
+
+    expect(resolution.key, 'local|42|9|160');
+    expect(resolution.path, '/tmp/cached.jpg');
+    expect(resolution.hasArtwork, isTrue);
+    expect(resolution.isFallback, isFalse);
+    expect(source.calls, 0);
+    expect(embedded.calls, 0);
+  });
+
+  test('memoizes final miss during resolver lifetime', () async {
+    final store = _FakeStore();
+    final source = _FakeSource(result: null);
+    final embedded = _FakeEmbeddedSource(result: null);
+    final resolver = ArtworkCacheResolver(
+      store: store,
+      source: source,
+      embeddedSource: embedded,
+    );
+
+    final first = await resolver.resolve(track: track, sizePx: 160);
+    final second = await resolver.resolve(track: track, sizePx: 160);
+
+    expect(first.key, 'local|42|9|160');
+    expect(first.hasArtwork, isFalse);
+    expect(second.hasArtwork, isFalse);
+    expect(source.calls, 1);
+    expect(embedded.calls, 1);
+    expect(store.writes, 0);
+  });
 }
 
 class _FakeStore implements ArtworkCacheStore {
@@ -86,6 +127,9 @@ class _FakeStore implements ArtworkCacheStore {
   final String? afterWritePath;
   int writes = 0;
   List<int>? writtenBytes;
+
+  @override
+  int get maxCacheSizeBytes => 1024;
 
   @override
   Future<String?> readPath(ArtworkCacheKey key) async {

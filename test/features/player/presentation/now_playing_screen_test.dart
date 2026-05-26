@@ -1,10 +1,14 @@
 import 'package:audio_service/audio_service.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/application/player_controller.dart';
 import 'package:vanta_music/features/player/presentation/now_playing_screen.dart';
+import 'package:vanta_music/features/premium_metadata/application/premium_metadata_providers.dart';
+import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dart';
 
 void main() {
   testWidgets('shows current queue and exposes basic queue commands', (
@@ -91,6 +95,53 @@ void main() {
     expect(control.playNextTrack?.id, 'a');
     expect(control.addEndTrack?.id, 'a');
   });
+
+  testWidgets(
+    'renders source metadata first, then enriched now-playing metadata',
+    (tester) async {
+      final store = _ControlledMetadataOverrideStore();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            mediaItemProvider.overrideWith((ref) => Stream.value(_item('a'))),
+            currentQueueProvider.overrideWith(
+              (ref) => Stream.value([_item('a')]),
+            ),
+            playbackPositionProvider.overrideWith(
+              (ref) => Stream.value(Duration.zero),
+            ),
+            playbackDurationProvider.overrideWith(
+              (ref) => Stream.value(const Duration(minutes: 3)),
+            ),
+            playbackStateProvider.overrideWith(
+              (ref) => Stream.value(PlaybackState()),
+            ),
+            playerControllerProvider.overrideWithValue(
+              PlayerController(_FakePlayerAudioControl()),
+            ),
+            metadataOverrideStoreProvider.overrideWithValue(store),
+          ],
+          child: const MaterialApp(home: NowPlayingScreen()),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Track a'), findsOneWidget);
+      expect(find.text('Artist'), findsOneWidget);
+
+      store.complete(
+        const MetadataOverride(
+          title: 'Display Track',
+          artist: 'Display Artist',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Display Track'), findsOneWidget);
+      expect(find.text('Display Artist'), findsOneWidget);
+    },
+  );
 }
 
 MediaItem _item(String id) => MediaItem(
@@ -99,6 +150,24 @@ MediaItem _item(String id) => MediaItem(
   artist: 'Artist',
   extras: {'trackId': id, 'providerId': 'local'},
 );
+
+class _ControlledMetadataOverrideStore implements MetadataOverrideStore {
+  final Completer<MetadataOverride?> _completer =
+      Completer<MetadataOverride?>();
+
+  void complete(MetadataOverride? override) {
+    _completer.complete(override);
+  }
+
+  @override
+  Future<MetadataOverride?> loadOverride(String trackKey) => _completer.future;
+
+  @override
+  Future<void> saveOverride(String trackKey, MetadataOverride override) async {}
+
+  @override
+  Future<void> clearOverride(String trackKey) async {}
+}
 
 class _FakePlayerAudioControl implements PlayerAudioControl {
   int? jumpedIndex;

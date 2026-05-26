@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/domain/music_provider.dart';
 import '../../providers/infrastructure/local_music_provider.dart';
+import '../../premium_metadata/application/premium_metadata_providers.dart';
+import '../../premium_metadata/domain/metadata_models.dart';
 import '../domain/album.dart';
 import '../domain/artist.dart';
 import '../domain/track.dart';
@@ -65,6 +67,11 @@ final filteredTracksProvider = Provider.family<List<Track>, String>((
   final tracks = ref.watch(tracksProvider).valueOrNull ?? const <Track>[];
   return filterTracksForQuery(tracks, query);
 });
+
+final libraryTrackDisplayMetadataProvider =
+    FutureProvider.family<ResolvedTrackMetadata, Track>((ref, track) {
+      return ref.watch(resolvedTrackMetadataProvider(track).future);
+    });
 
 final albumsProvider = Provider<List<Album>>((ref) {
   final tracks = ref.watch(tracksProvider).valueOrNull ?? const <Track>[];

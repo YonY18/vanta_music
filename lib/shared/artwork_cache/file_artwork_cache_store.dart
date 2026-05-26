@@ -9,6 +9,7 @@ import 'artwork_cache_key.dart';
 typedef AppSupportDirectoryResolver = Future<Directory> Function();
 
 abstract class ArtworkCacheStore {
+  int get maxCacheSizeBytes;
   Future<String?> readPath(ArtworkCacheKey key);
   Future<void> writeBytes(ArtworkCacheKey key, Uint8List bytes);
 }
@@ -16,7 +17,7 @@ abstract class ArtworkCacheStore {
 class FileArtworkCacheStore implements ArtworkCacheStore {
   FileArtworkCacheStore({
     AppSupportDirectoryResolver? appSupportDirectory,
-    this._maxCacheSizeBytes = defaultMaxCacheSizeBytes,
+    this.maxCacheSizeBytes = defaultMaxCacheSizeBytes,
   }) : _appSupportDirectory =
            appSupportDirectory ?? getApplicationSupportDirectory;
 
@@ -26,7 +27,8 @@ class FileArtworkCacheStore implements ArtworkCacheStore {
   static const int defaultMaxCacheSizeBytes = 256 * 1024 * 1024;
 
   final AppSupportDirectoryResolver _appSupportDirectory;
-  final int _maxCacheSizeBytes;
+  @override
+  final int maxCacheSizeBytes;
 
   Future<File> resolveFile(ArtworkCacheKey key) async {
     final root = await _appSupportDirectory();
@@ -97,14 +99,14 @@ class FileArtworkCacheStore implements ArtworkCacheStore {
         );
       }
 
-      if (totalSizeBytes <= _maxCacheSizeBytes) return;
+      if (totalSizeBytes <= maxCacheSizeBytes) return;
 
       fileStats.sort((a, b) => a.lastModified.compareTo(b.lastModified));
       for (final stat in fileStats) {
         try {
           await stat.file.delete();
           totalSizeBytes -= stat.sizeBytes;
-          if (totalSizeBytes <= _maxCacheSizeBytes) break;
+          if (totalSizeBytes <= maxCacheSizeBytes) break;
         } on IOException {
           continue;
         }
