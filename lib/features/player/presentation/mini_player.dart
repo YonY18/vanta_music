@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
+import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../application/media_item_artwork_request.dart';
 import '../application/player_controller.dart';
 
@@ -18,6 +19,16 @@ class MiniPlayer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final item = ref.watch(mediaItemProvider).valueOrNull;
     if (item == null) return const SizedBox.shrink();
+    final track = trackFromMediaItem(item);
+    final displayMetadata = track == null
+        ? null
+        : ref
+              .watch(
+                resolvedTrackMetadataRequestProvider(
+                  TrackMetadataRequest.fromTrack(track),
+                ),
+              )
+              .valueOrNull;
 
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -46,13 +57,13 @@ class MiniPlayer extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        item.title,
+                        displayMetadata?.title ?? item.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
-                        item.artist ?? 'Desconocido',
+                        displayMetadata?.artist ?? item.artist ?? 'Desconocido',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

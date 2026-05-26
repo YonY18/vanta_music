@@ -1217,6 +1217,9 @@ class _TrackTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final displayMetadata = ref
+        .watch(libraryTrackDisplayMetadataProvider(track))
+        .valueOrNull;
     final querySize = resolveArtworkQuerySize(
       logicalSize: 56,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -1253,7 +1256,7 @@ class _TrackTile extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      track.title,
+                      displayMetadata?.title ?? track.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -1263,7 +1266,7 @@ class _TrackTile extends ConsumerWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${track.artist} • ${track.album}',
+                      '${displayMetadata?.artist ?? track.artist} • ${displayMetadata?.album ?? track.album}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(

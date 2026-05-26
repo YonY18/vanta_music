@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:on_audio_query/on_audio_query.dart';
 
 import '../../features/library/domain/track.dart';
+import '../../features/premium_metadata/domain/metadata_models.dart';
 import 'artwork_cache_diagnostics.dart';
 import 'artwork_cache_key.dart';
 import 'file_artwork_cache_store.dart';
@@ -33,7 +34,7 @@ class OnAudioQueryArtworkBytesSource implements ArtworkBytesSource {
 }
 
 class ArtworkCacheResolver {
-  const ArtworkCacheResolver({
+  ArtworkCacheResolver({
     required this.store,
     required this.source,
     required this.embeddedSource,
@@ -42,8 +43,16 @@ class ArtworkCacheResolver {
   final ArtworkCacheStore store;
   final ArtworkBytesSource source;
   final EmbeddedArtworkBytesSource embeddedSource;
+  final Set<String> _memoizedMisses = <String>{};
 
   Future<String?> resolvePath({
+    required Track track,
+    required int sizePx,
+  }) async {
+    return (await resolve(track: track, sizePx: sizePx)).path;
+  }
+
+  Future<ArtworkResolution> resolve({
     required Track track,
     required int sizePx,
   }) async {
@@ -56,11 +65,21 @@ class ArtworkCacheResolver {
       sizePx: sizePx,
       sourceUri: track.uri.toString(),
     );
+    final rawKey = key.raw;
+
+    if (_memoizedMisses.contains(rawKey)) {
+      _debugLog(track, 'memoized miss');
+      return ArtworkResolution(key: rawKey, resolvedAt: DateTime.now());
+    }
 
     final cachedPath = await store.readPath(key);
     if (cachedPath != null) {
       _debugLog(track, 'cache hit path=$cachedPath');
-      return cachedPath;
+      return ArtworkResolution(
+        key: rawKey,
+        path: cachedPath,
+        resolvedAt: DateTime.now(),
+      );
     }
 
     Uint8List? bytes;
@@ -94,13 +113,23 @@ class ArtworkCacheResolver {
 
     if (bytes == null || bytes.isEmpty) {
       _debugLog(track, 'final miss');
-      return null;
+      _memoizedMisses.add(rawKey);
+      return ArtworkResolution(key: rawKey, resolvedAt: DateTime.now());
     }
 
     await store.writeBytes(key, bytes);
     final writtenPath = await store.readPath(key);
     _debugLog(track, 'cache write path=$writtenPath');
-    return writtenPath;
+    if (writtenPath == null) {
+      _memoizedMisses.add(rawKey);
+      return ArtworkResolution(key: rawKey, resolvedAt: DateTime.now());
+    }
+    return ArtworkResolution(
+      key: rawKey,
+      path: writtenPath,
+      isFallback: artworkId == null,
+      resolvedAt: DateTime.now(),
+    );
   }
 
   void _debugLog(Track track, String message) {

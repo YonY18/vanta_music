@@ -8,6 +8,7 @@ import '../../../app/theme.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
 import '../../../shared/utils/duration_format.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
+import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../application/media_item_artwork_request.dart';
 import '../application/player_controller.dart';
 
@@ -17,6 +18,16 @@ class NowPlayingScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final item = ref.watch(mediaItemProvider).valueOrNull;
+    final track = item == null ? null : trackFromMediaItem(item);
+    final displayMetadata = track == null
+        ? null
+        : ref
+              .watch(
+                resolvedTrackMetadataRequestProvider(
+                  TrackMetadataRequest.fromTrack(track),
+                ),
+              )
+              .valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -47,7 +58,7 @@ class NowPlayingScreen extends ConsumerWidget {
                     _NowPlayingArtwork(item: item),
                     const SizedBox(height: 32),
                     Text(
-                      item.title,
+                      displayMetadata?.title ?? item.title,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -60,7 +71,7 @@ class NowPlayingScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item.artist ?? 'Desconocido',
+                      displayMetadata?.artist ?? item.artist ?? 'Desconocido',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(

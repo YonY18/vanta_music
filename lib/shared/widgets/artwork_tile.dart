@@ -13,6 +13,8 @@ class ArtworkTile extends StatelessWidget {
     this.size = 56,
     this.showPlaceholderOnly = false,
     this.cachedArtworkPath,
+    this.placeholderDominantColor,
+    this.placeholderAccentColor,
   });
 
   final int? id;
@@ -20,6 +22,8 @@ class ArtworkTile extends StatelessWidget {
   final double size;
   final bool showPlaceholderOnly;
   final String? cachedArtworkPath;
+  final Color? placeholderDominantColor;
+  final Color? placeholderAccentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -88,9 +92,11 @@ class ArtworkTile extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            VantaColors.violet.withValues(alpha: 0.62),
+            placeholderAccentColor?.withValues(alpha: 0.62) ??
+                VantaColors.violet.withValues(alpha: 0.62),
             VantaColors.surfaceHigh,
-            VantaColors.surfaceElevated,
+            placeholderDominantColor?.withValues(alpha: 0.62) ??
+                VantaColors.surfaceElevated,
           ],
         ),
       ),

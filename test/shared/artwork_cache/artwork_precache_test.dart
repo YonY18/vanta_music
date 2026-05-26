@@ -117,6 +117,9 @@ class _TrackingResolver extends ArtworkCacheResolver {
 
 class _NoopStore implements ArtworkCacheStore {
   @override
+  int get maxCacheSizeBytes => 1024;
+
+  @override
   Future<String?> readPath(ArtworkCacheKey key) async => null;
 
   @override
