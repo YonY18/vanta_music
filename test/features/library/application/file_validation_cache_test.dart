@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/library/application/file_validation_cache.dart';
 
@@ -38,21 +36,24 @@ void main() {
     expect(cache.read(uri)?.state, ValidationState.invalid);
   });
 
-  test('invalidateAll and invalidateUris clear only intended entries', () async {
-    Future<bool> probe(Uri uri) async => true;
-    final cache = InMemoryFileValidationCache(existsProbe: probe);
+  test(
+    'invalidateAll and invalidateUris clear only intended entries',
+    () async {
+      Future<bool> probe(Uri uri) async => true;
+      final cache = InMemoryFileValidationCache(existsProbe: probe);
 
-    final a = Uri.file('/music/a.mp3');
-    final b = Uri.file('/music/b.mp3');
+      final a = Uri.file('/music/a.mp3');
+      final b = Uri.file('/music/b.mp3');
 
-    await cache.validate(a);
-    await cache.validate(b);
-    cache.invalidateUris([a]);
+      await cache.validate(a);
+      await cache.validate(b);
+      cache.invalidateUris([a]);
 
-    expect(cache.read(a), isNull);
-    expect(cache.read(b), isNotNull);
+      expect(cache.read(a), isNull);
+      expect(cache.read(b), isNotNull);
 
-    cache.invalidateAll();
-    expect(cache.read(b), isNull);
-  });
+      cache.invalidateAll();
+      expect(cache.read(b), isNull);
+    },
+  );
 }

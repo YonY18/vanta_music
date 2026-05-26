@@ -10,16 +10,12 @@ typedef LibraryIntelligenceChanged = void Function();
 
 class LibraryIntelligenceSink {
   LibraryIntelligenceSink({
-    required LibraryIntelligenceStore store,
-    required LibraryIntelligenceReducer reducer,
-    Duration debounceDuration = const Duration(milliseconds: 400),
+    required this._store,
+    required this._reducer,
+    this._debounceDuration = const Duration(milliseconds: 400),
     ClockNow? now,
-    LibraryIntelligenceChanged? onChanged,
-  }) : _store = store,
-       _reducer = reducer,
-       _debounceDuration = debounceDuration,
-       _now = now ?? DateTime.now,
-       _onChanged = onChanged;
+    this._onChanged,
+  }) : _now = now ?? DateTime.now;
 
   final LibraryIntelligenceStore _store;
   final LibraryIntelligenceReducer _reducer;

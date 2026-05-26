@@ -13,14 +13,16 @@ void main() {
   late Directory tempDir;
 
   setUp(() async {
-    tempDir = await Directory.systemTemp.createTemp('library-intelligence-test');
+    tempDir = await Directory.systemTemp.createTemp(
+      'library-intelligence-test',
+    );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      if (call.method == 'getApplicationSupportDirectory') {
-        return tempDir.path;
-      }
-      return null;
-    });
+          if (call.method == 'getApplicationSupportDirectory') {
+            return tempDir.path;
+          }
+          return null;
+        });
   });
 
   tearDown(() async {
@@ -52,8 +54,7 @@ void main() {
     await store.save(snapshot);
     final loaded = await store.load();
 
-    expect(loaded, isNotNull);
-    expect(loaded!.tracks['local::1']?.playCount, 3);
+    expect(loaded.tracks['local::1']?.playCount, 3);
     expect(loaded.tracks['local::1']?.isFavorite, isTrue);
   });
 

@@ -16,10 +16,9 @@ abstract class ArtworkCacheStore {
 class FileArtworkCacheStore implements ArtworkCacheStore {
   FileArtworkCacheStore({
     AppSupportDirectoryResolver? appSupportDirectory,
-    int maxCacheSizeBytes = defaultMaxCacheSizeBytes,
-  }) : _maxCacheSizeBytes = maxCacheSizeBytes,
-       _appSupportDirectory =
-          appSupportDirectory ?? getApplicationSupportDirectory;
+    this._maxCacheSizeBytes = defaultMaxCacheSizeBytes,
+  }) : _appSupportDirectory =
+           appSupportDirectory ?? getApplicationSupportDirectory;
 
   static const _artworkDirectoryName = 'artwork';
   // Premium app behavior: keep scroll smooth with persistent thumbnails
