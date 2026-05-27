@@ -1345,8 +1345,17 @@ class _SubsonicConnectSheetState extends ConsumerState<_SubsonicConnectSheet> {
 
 String _serverId(String baseUrl, String username) {
   final uri = Uri.parse(baseUrl.trim());
-  final host = uri.host.isEmpty ? 'server' : uri.host;
-  final raw = '$host-${username.trim()}'.toLowerCase();
+  final scheme = uri.scheme.isEmpty ? 'https' : uri.scheme.toLowerCase();
+  final host = uri.host.isEmpty ? 'server' : uri.host.toLowerCase();
+  final port = uri.hasPort ? uri.port.toString() : '';
+  final path = uri.path.replaceAll(RegExp(r'/+$'), '').toLowerCase();
+  final raw = [
+    scheme,
+    host,
+    if (port.isNotEmpty) port,
+    if (path.isNotEmpty) path,
+    username.trim().toLowerCase(),
+  ].join('-');
   final safe = raw.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
   return safe.replaceAll(RegExp(r'^-+|-+$'), '');
 }

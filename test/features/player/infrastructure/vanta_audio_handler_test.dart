@@ -92,6 +92,49 @@ void main() {
         ]);
       },
     );
+
+    for (final providerId in [null, '', 'local']) {
+      test(
+        'routes Subsonic item with ${providerId ?? 'missing'} providerId through resolver',
+        () async {
+          final item = MediaItem(
+            id: 'subsonic://track?serverId=server-a&id=remote-1',
+            title: 'Remote track',
+            extras: providerId == null ? null : {'providerId': providerId},
+          );
+          final registry = _FailClosedStreamResolverRegistry();
+
+          await expectLater(
+            VantaAudioHandler.resolveQueueItemUris([item], registry),
+            throwsA(isA<StateError>()),
+          );
+
+          expect(registry.requests, [item.id]);
+        },
+      );
+    }
+
+    test(
+      'routes Subsonic canonicalUri through resolver even when media id is local',
+      () async {
+        final item = MediaItem(
+          id: 'file:///queue/stale-local.mp3',
+          title: 'Remote track',
+          extras: const {
+            'providerId': 'local',
+            'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+          },
+        );
+        final registry = _FailClosedStreamResolverRegistry();
+
+        await expectLater(
+          VantaAudioHandler.resolveQueueItemUris([item], registry),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(registry.requests, [item.id]);
+      },
+    );
   });
 }
 
@@ -120,5 +163,15 @@ class _FakeStreamResolverRegistry implements StreamResolverRegistry {
     final key = VantaAudioHandler.normalizeTrackKey(item)!;
     requests.add(key);
     return _resolved[key] ?? Uri.parse(item.id);
+  }
+}
+
+class _FailClosedStreamResolverRegistry implements StreamResolverRegistry {
+  final List<String> requests = [];
+
+  @override
+  Future<Uri> resolve(MediaItem item) async {
+    requests.add(item.id);
+    throw StateError('resolver required');
   }
 }

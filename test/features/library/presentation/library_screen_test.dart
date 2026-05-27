@@ -227,16 +227,79 @@ void main() {
       await tester.pumpAndSettle();
 
       final state = await metadataStore.read();
-      expect(state.activeServerId, 'music-example-com-alice');
+      expect(state.activeServerId, 'https-music-example-com-alice');
       expect(state.servers.single.name, 'Home Navidrome');
       expect(state.servers.single.baseUrl, 'https://music.example.com');
       expect(
-        await secretStore.readPassword('music-example-com-alice'),
+        await secretStore.readPassword('https-music-example-com-alice'),
         'secret-password',
       );
       expect(find.text('Subsonic server connected.'), findsOneWidget);
     },
   );
+
+  testWidgets('uses scheme, port, path, and username in Subsonic ids', (
+    tester,
+  ) async {
+    final metadataStore = _MemorySubsonicMetadataStore();
+    final secretStore = InMemorySubsonicSecretStore();
+    final serverStore = SubsonicServerStore(
+      metadataStore: metadataStore,
+      secretStore: secretStore,
+    );
+    final client = _ControlledSubsonicApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tracksProvider.overrideWith((ref) async => const <Track>[]),
+          subsonicServerStoreProvider.overrideWith((ref) async => serverStore),
+          subsonicApiClientFactoryProvider.overrideWithValue(({
+            required server,
+            required password,
+          }) {
+            client.server = server;
+            client.password = password;
+            return client;
+          }),
+          libraryIntelligenceSnapshotProvider.overrideWith(
+            (ref) async => const LibrarySnapshot.empty(),
+          ),
+          localPlaylistStoreProvider.overrideWithValue(_MemoryPlaylistStore()),
+        ],
+        child: const MaterialApp(home: LibraryScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(Tab, 'Remote'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect to Subsonic'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Office Navidrome');
+    await tester.enterText(
+      fields.at(1),
+      'http://music.example.com:4533/navidrome/',
+    );
+    await tester.enterText(fields.at(2), 'Alice');
+    await tester.enterText(fields.at(3), 'secret-password');
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Connect to Subsonic').last,
+    );
+    await tester.pump();
+
+    client.completePing();
+    await tester.pumpAndSettle();
+
+    final state = await metadataStore.read();
+    expect(state.activeServerId, 'http-music-example-com-4533-navidrome-alice');
+    expect(
+      state.servers.single.baseUrl,
+      'http://music.example.com:4533/navidrome',
+    );
+  });
 }
 
 extension on WidgetTester {

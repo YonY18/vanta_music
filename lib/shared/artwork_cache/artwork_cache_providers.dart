@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/providers/application/subsonic_providers.dart';
 import '../../features/library/domain/track.dart';
 import 'artwork_cache_resolver.dart';
 import 'artwork_precache.dart';
@@ -8,6 +9,7 @@ import 'file_artwork_cache_store.dart';
 import 'flac_embedded_artwork_extractor.dart';
 import 'folder_artwork_bytes_source.dart';
 import 'mp3_embedded_artwork_extractor.dart';
+import 'subsonic_remote_artwork_bytes_source.dart';
 
 final artworkCacheStoreProvider = Provider<ArtworkCacheStore>(
   (ref) => FileArtworkCacheStore(),
@@ -17,9 +19,14 @@ final artworkBytesSourceProvider = Provider<ArtworkBytesSource>(
   (ref) => OnAudioQueryArtworkBytesSource(),
 );
 
-final remoteArtworkBytesSourceProvider = Provider<RemoteArtworkBytesSource>(
-  (ref) => HttpRemoteArtworkBytesSource(),
-);
+final remoteArtworkBytesSourceProvider = Provider<RemoteArtworkBytesSource>((
+  ref,
+) {
+  return SubsonicRemoteArtworkBytesSource(
+    storeLoader: () => ref.read(subsonicServerStoreProvider.future),
+    clientFactory: ref.watch(subsonicApiClientFactoryProvider),
+  );
+});
 
 final artworkCacheResolverProvider = Provider<ArtworkCacheResolver>((ref) {
   return ArtworkCacheResolver(
