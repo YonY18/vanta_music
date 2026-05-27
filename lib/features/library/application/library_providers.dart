@@ -1,14 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../../providers/application/subsonic_providers.dart';
 import '../../providers/domain/music_provider.dart';
 import '../../providers/infrastructure/local_music_provider.dart';
-import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../../providers/infrastructure/subsonic_music_provider.dart';
-import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../../premium_metadata/domain/metadata_models.dart';
 import '../domain/album.dart';
@@ -25,6 +22,8 @@ import 'library_search.dart';
 import 'library_track_merge.dart';
 import 'media_permission_service.dart';
 
+export '../../providers/application/subsonic_providers.dart';
+
 final mediaPermissionServiceProvider = Provider(
   (ref) => MediaPermissionService(),
 );
@@ -34,30 +33,6 @@ final localMusicProvider = Provider<MusicProvider>(
 );
 
 final activeRemoteMusicProvider = Provider<MusicProvider?>((ref) => null);
-
-typedef SubsonicApiClientFactory =
-    SubsonicApiClientContract Function({
-      required SubsonicServerConfig server,
-      required String password,
-    });
-
-final subsonicApiClientFactoryProvider = Provider<SubsonicApiClientFactory>(
-  (ref) =>
-      ({required server, required password}) =>
-          SubsonicApiClient(server: server, password: password),
-);
-
-final subsonicServerStoreProvider = FutureProvider<SubsonicServerStore>((
-  ref,
-) async {
-  final directory = await getApplicationSupportDirectory();
-  return SubsonicServerStore(
-    metadataStore: FileSubsonicServerMetadataStore(
-      File('${directory.path}/subsonic_servers.json'),
-    ),
-    secretStore: const FlutterSecureSubsonicSecretStore(),
-  );
-});
 
 final savedSubsonicMusicProvider = FutureProvider<MusicProvider?>((ref) async {
   final store = await ref.watch(subsonicServerStoreProvider.future);

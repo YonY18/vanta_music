@@ -222,12 +222,24 @@ class VantaAudioHandler extends BaseAudioHandler
     return Future.wait(
       items.map((item) {
         final providerId = item.extras?['providerId']?.toString();
-        if (providerId == null || providerId.isEmpty || providerId == 'local') {
+        if (!_isSubsonicQueueItem(item) &&
+            (providerId == null ||
+                providerId.isEmpty ||
+                providerId == 'local')) {
           return Future<Uri>.value(Uri.parse(item.id));
         }
         return registry.resolve(item);
       }),
     );
+  }
+
+  static bool _isSubsonicQueueItem(MediaItem item) {
+    final id = Uri.tryParse(item.id);
+    if (id != null && id.isScheme('subsonic')) return true;
+
+    final canonicalUri = item.extras?['canonicalUri']?.toString();
+    if (canonicalUri == null || canonicalUri.isEmpty) return false;
+    return Uri.tryParse(canonicalUri)?.isScheme('subsonic') ?? false;
   }
 
   static List<MediaItem> removeQueueItems(

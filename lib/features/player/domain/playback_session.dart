@@ -1,5 +1,7 @@
 import 'package:audio_service/audio_service.dart';
 
+import '../../providers/domain/provider_identity.dart';
+
 class PlaybackSession {
   const PlaybackSession({
     required this.queue,
@@ -14,9 +16,18 @@ class PlaybackSession {
   final DateTime? savedAt;
 
   Map<String, dynamic> toJson() {
+    final safeQueue = <({int originalIndex, Map<String, dynamic> json})>[];
+    for (var i = 0; i < queue.length; i++) {
+      final json = _mediaItemToJson(queue[i]);
+      if (json != null) safeQueue.add((originalIndex: i, json: json));
+    }
+    final safeCurrentIndex = safeQueue.indexWhere(
+      (entry) => entry.originalIndex == currentIndex,
+    );
+
     return {
-      'queue': queue.map(_mediaItemToJson).toList(growable: false),
-      'currentIndex': currentIndex,
+      'queue': safeQueue.map((entry) => entry.json).toList(growable: false),
+      'currentIndex': safeCurrentIndex < 0 ? 0 : safeCurrentIndex,
       'positionMs': position.inMilliseconds,
       'savedAt': (savedAt ?? DateTime.now()).toIso8601String(),
     };
@@ -43,8 +54,9 @@ class PlaybackSession {
     );
   }
 
-  static Map<String, dynamic> _mediaItemToJson(MediaItem item) {
+  static Map<String, dynamic>? _mediaItemToJson(MediaItem item) {
     final safeId = _safeMediaId(item);
+    if (safeId == null) return null;
     return {
       'id': safeId,
       'title': item.title,
@@ -73,12 +85,39 @@ class PlaybackSession {
     );
   }
 
-  static String _safeMediaId(MediaItem item) {
+  static String? _safeMediaId(MediaItem item) {
     final canonicalUri = item.extras?['canonicalUri']?.toString();
-    if (_isRemoteProvider(item.extras) && canonicalUri?.isNotEmpty == true) {
-      return canonicalUri!;
+    if (_isRemoteProvider(item.extras)) {
+      if (canonicalUri?.isNotEmpty == true &&
+          !_isAuthBearingUriString(canonicalUri!)) {
+        return canonicalUri;
+      }
+      if (_isAuthBearingUriString(item.id) ||
+          _isAuthBearingUriString(canonicalUri ?? '')) {
+        return _syntheticCanonicalUri(item.extras);
+      }
     }
     return item.id;
+  }
+
+  static String? _syntheticCanonicalUri(Map<String, dynamic>? extras) {
+    final providerId = extras?['providerId']?.toString();
+    final trackId = extras?['trackId']?.toString();
+    if (providerId == null || trackId == null) return null;
+    if (!providerId.startsWith('$subsonicProviderPrefix:')) return null;
+
+    final serverId = providerId.substring('$subsonicProviderPrefix:'.length);
+    final providerScopedPrefix = '$providerId:';
+    final itemId = trackId.startsWith(providerScopedPrefix)
+        ? trackId.substring(providerScopedPrefix.length)
+        : trackId;
+    if (serverId.isEmpty || itemId.isEmpty) return null;
+
+    return Uri(
+      scheme: 'subsonic',
+      host: 'track',
+      queryParameters: {'serverId': serverId, 'id': itemId},
+    ).toString();
   }
 
   static Map<String, dynamic>? _safeExtras(

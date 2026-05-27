@@ -81,4 +81,72 @@ void main() {
       );
     },
   );
+
+  test(
+    'synthesizes canonical remote identity instead of persisting auth-bearing item id',
+    () {
+      const item = MediaItem(
+        id: 'https://music.example/rest/stream.view?id=remote-1&t=secret-token&s=salt&u=user',
+        title: 'Remote Song',
+        extras: {
+          'trackId': 'subsonic:server-a:remote-1',
+          'providerId': 'subsonic:server-a',
+        },
+      );
+      final session = PlaybackSession(
+        queue: const [item],
+        currentIndex: 0,
+        position: Duration.zero,
+      );
+
+      final json = session.toJson();
+      final serialized = json.toString();
+      final restored = PlaybackSession.fromJson(json);
+
+      expect(serialized, isNot(contains('secret-token')));
+      expect(serialized, isNot(contains('stream.view')));
+      expect(restored, isNotNull);
+      expect(
+        restored!.queue.single.id,
+        'subsonic://track?serverId=server-a&id=remote-1',
+      );
+      expect(
+        restored.queue.single.extras,
+        containsPair(
+          'canonicalUri',
+          'subsonic://track?serverId=server-a&id=remote-1',
+        ),
+      );
+    },
+  );
+
+  test('does not persist auth-bearing remote canonical URI', () {
+    const item = MediaItem(
+      id: 'https://music.example/rest/stream.view?id=remote-1',
+      title: 'Remote Song',
+      extras: {
+        'trackId': 'subsonic:server-a:remote-1',
+        'providerId': 'subsonic:server-a',
+        'canonicalUri':
+            'https://music.example/rest/stream.view?id=remote-1&t=secret-token&s=salt&u=user',
+      },
+    );
+    final session = PlaybackSession(
+      queue: const [item],
+      currentIndex: 0,
+      position: Duration.zero,
+    );
+
+    final json = session.toJson();
+    final serialized = json.toString();
+    final restored = PlaybackSession.fromJson(json);
+
+    expect(serialized, isNot(contains('secret-token')));
+    expect(serialized, isNot(contains('stream.view')));
+    expect(restored, isNotNull);
+    expect(
+      restored!.queue.single.id,
+      'subsonic://track?serverId=server-a&id=remote-1',
+    );
+  });
 }

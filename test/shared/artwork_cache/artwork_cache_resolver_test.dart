@@ -156,6 +156,38 @@ void main() {
     },
   );
 
+  test(
+    'fetches mapped Subsonic cover-art ids without auth-bearing keys',
+    () async {
+      final remoteTrack = _remoteTrackWithCoverArtId();
+      final store = _FakeStore(afterWritePath: '/tmp/subsonic-remote.jpg');
+      final remote = _DelayedRemoteSource(
+        result: Uint8List.fromList([4, 5, 6]),
+      );
+      final resolver = ArtworkCacheResolver(
+        store: store,
+        source: _FakeSource(result: null),
+        embeddedSource: _FakeEmbeddedSource(result: null),
+        remoteSource: remote,
+      );
+
+      final resolution = await resolver.resolve(
+        track: remoteTrack,
+        sizePx: 160,
+      );
+
+      expect(resolution.path, '/tmp/subsonic-remote.jpg');
+      expect(remote.requestedUris.single.scheme, 'subsonic');
+      expect(remote.requestedUris.single.host, 'cover-art');
+      expect(remote.requestedUris.single.queryParameters['id'], 'cover-1');
+      expect(
+        store.writtenKeys.single.raw,
+        contains('remote-cover:subsonic:server-1:cover-1'),
+      );
+      expect(store.writtenKeys.single.raw, isNot(contains('secret')));
+    },
+  );
+
   test('reuses cached remote artwork without repeated network fetch', () async {
     final remoteTrack = _remoteTrack(
       coverUri: Uri.parse(
@@ -209,6 +241,25 @@ Track _remoteTrack({required Uri coverUri}) {
         'serverId': 'server-1',
         'id': 'song-1',
         'coverArtUri': coverUri.toString(),
+      },
+    ),
+  );
+}
+
+Track _remoteTrackWithCoverArtId() {
+  return Track(
+    id: 'song-1',
+    providerId: 'subsonic:server-1',
+    title: 'Remote Song',
+    artist: 'Remote Artist',
+    album: 'Remote Album',
+    uri: Uri(
+      scheme: 'subsonic',
+      host: 'track',
+      queryParameters: const <String, String>{
+        'serverId': 'server-1',
+        'id': 'song-1',
+        'coverArtId': 'cover-1',
       },
     ),
   );
