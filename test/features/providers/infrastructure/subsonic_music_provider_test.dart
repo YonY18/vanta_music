@@ -136,6 +136,158 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+
+  test(
+    'writes fresh remote snapshots using server and provider scope',
+    () async {
+      final snapshotStore = InMemoryRemoteLibrarySnapshotStore();
+      final provider = SubsonicMusicProvider(
+        server: server,
+        client: _FakeSubsonicApiClient(
+          albums: [
+            const SubsonicAlbum(
+              id: 'album-1',
+              title: 'Blue Room',
+              artist: 'Nina',
+            ),
+          ],
+          songs: [
+            const SubsonicSong(
+              id: 'song-1',
+              title: 'Night Drive',
+              artist: 'Nina',
+              album: 'Blue Room',
+              albumId: 'album-1',
+            ),
+          ],
+        ),
+        snapshotStore: snapshotStore,
+        clock: () => DateTime.utc(2026, 5, 30, 21, 0),
+      );
+
+      final snapshot = await provider.loadTrackSnapshot();
+
+      expect(snapshot.serverId, 'home');
+      expect(snapshot.providerId, subsonicProviderId('home'));
+      expect(snapshot.isStale, isFalse);
+      expect(snapshot.isPartial, isFalse);
+      expect(snapshot.lastSyncAt, DateTime.utc(2026, 5, 30, 21, 0));
+      expect(
+        snapshot.tracks.single.id,
+        remoteItemId(serverId: 'home', itemId: 'song-1'),
+      );
+
+      final cached = await snapshotStore.read(
+        serverId: 'home',
+        providerId: subsonicProviderId('home'),
+      );
+      expect(
+        cached?.tracks.single.id,
+        remoteItemId(serverId: 'home', itemId: 'song-1'),
+      );
+    },
+  );
+
+  test('bounds remote hydration to the configured album window', () async {
+    final client = _FakeSubsonicApiClient(
+      albums: const [
+        SubsonicAlbum(id: 'album-1', title: 'One', artist: 'Nina'),
+        SubsonicAlbum(id: 'album-2', title: 'Two', artist: 'Nina'),
+        SubsonicAlbum(id: 'album-3', title: 'Three', artist: 'Nina'),
+      ],
+      songs: const [
+        SubsonicSong(
+          id: 'song-1',
+          title: 'Track 1',
+          artist: 'Nina',
+          album: 'One',
+          albumId: 'album-1',
+        ),
+        SubsonicSong(
+          id: 'song-2',
+          title: 'Track 2',
+          artist: 'Nina',
+          album: 'Two',
+          albumId: 'album-2',
+        ),
+        SubsonicSong(
+          id: 'song-3',
+          title: 'Track 3',
+          artist: 'Nina',
+          album: 'Three',
+          albumId: 'album-3',
+        ),
+      ],
+    );
+    final provider = SubsonicMusicProvider(
+      server: server,
+      client: client,
+      remoteAlbumHydrationLimit: 2,
+    );
+
+    final snapshot = await provider.loadTrackSnapshot();
+
+    expect(client.lastAlbumListSize, 2);
+    expect(client.albumDetailRequests, ['album-1', 'album-2']);
+    expect(snapshot.isPartial, isTrue);
+    expect(snapshot.tracks.map((track) => track.title), ['Track 1', 'Track 2']);
+  });
+
+  test(
+    'returns stale cached tracks for the active server only when unavailable',
+    () async {
+      final snapshotStore = InMemoryRemoteLibrarySnapshotStore(
+        snapshots: [
+          RemoteLibrarySnapshot(
+            serverId: 'home',
+            providerId: subsonicProviderId('home'),
+            tracks: [
+              Track(
+                id: remoteItemId(serverId: 'home', itemId: 'song-1'),
+                providerId: subsonicProviderId('home'),
+                title: 'Cached Home Song',
+                artist: 'Nina',
+                album: 'Blue Room',
+                uri: Uri.parse('subsonic://track?serverId=home&id=song-1'),
+              ),
+            ],
+            lastSyncAt: DateTime.utc(2026, 5, 29, 18, 30),
+            isStale: false,
+          ),
+          RemoteLibrarySnapshot(
+            serverId: 'work',
+            providerId: subsonicProviderId('work'),
+            tracks: [
+              Track(
+                id: remoteItemId(serverId: 'work', itemId: 'song-9'),
+                providerId: subsonicProviderId('work'),
+                title: 'Wrong Server Song',
+                artist: 'Mara',
+                album: 'Clouds',
+                uri: Uri.parse('subsonic://track?serverId=work&id=song-9'),
+              ),
+            ],
+            lastSyncAt: DateTime.utc(2026, 5, 28, 12, 0),
+            isStale: false,
+          ),
+        ],
+      );
+      final provider = SubsonicMusicProvider(
+        server: server,
+        client: _FakeSubsonicApiClient(
+          unavailableError: const SubsonicUnavailableFailure('Server is down'),
+        ),
+        snapshotStore: snapshotStore,
+      );
+
+      final snapshot = await provider.loadTrackSnapshot();
+
+      expect(snapshot.isStale, isTrue);
+      expect(snapshot.failure, isA<SubsonicUnavailableFailure>());
+      expect(snapshot.lastSyncAt, DateTime.utc(2026, 5, 29, 18, 30));
+      expect(snapshot.tracks.single.title, 'Cached Home Song');
+    },
+  );
 }
 
 class _FakeSubsonicApiClient implements SubsonicApiClientContract {
@@ -145,6 +297,7 @@ class _FakeSubsonicApiClient implements SubsonicApiClientContract {
     this.songs = const [],
     this.searchSongs = const [],
     this.configuredStreamUri,
+    this.unavailableError,
   });
 
   final List<SubsonicArtist> artists;
@@ -152,7 +305,10 @@ class _FakeSubsonicApiClient implements SubsonicApiClientContract {
   final List<SubsonicSong> songs;
   final List<SubsonicSong> searchSongs;
   final Uri? configuredStreamUri;
+  final Object? unavailableError;
   int downloadRequests = 0;
+  int? lastAlbumListSize;
+  final List<String> albumDetailRequests = <String>[];
 
   @override
   Future<void> ping() async {}
@@ -163,13 +319,25 @@ class _FakeSubsonicApiClient implements SubsonicApiClientContract {
   @override
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
-  }) async => albums;
+    int? size,
+    int? offset,
+  }) async {
+    if (unavailableError != null) throw unavailableError!;
+    lastAlbumListSize = size;
+    final start = offset ?? 0;
+    final bounded = albums.skip(start);
+    if (size == null) return bounded.toList(growable: false);
+    return bounded.take(size).toList(growable: false);
+  }
 
   @override
-  Future<SubsonicAlbumDetail> getAlbum(String id) async => SubsonicAlbumDetail(
-    album: albums.firstWhere((album) => album.id == id),
-    songs: songs.where((song) => song.albumId == id).toList(growable: false),
-  );
+  Future<SubsonicAlbumDetail> getAlbum(String id) async {
+    albumDetailRequests.add(id);
+    return SubsonicAlbumDetail(
+      album: albums.firstWhere((album) => album.id == id),
+      songs: songs.where((song) => song.albumId == id).toList(growable: false),
+    );
+  }
 
   @override
   Future<SubsonicSong> getSong(String id) async =>

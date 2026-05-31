@@ -78,4 +78,20 @@ void main() {
     expect(fileName, endsWith('.jpg'));
     expect(fileName.length, lessThanOrEqualTo(64));
   });
+
+  test(
+    'builds server-scoped remote artwork key from server and cover art ids',
+    () {
+      final key = buildArtworkCacheKey(
+        providerId: 'subsonic:server-a',
+        trackId: 'song-1',
+        artworkId: null,
+        sizePx: 160,
+        serverId: 'server-a',
+        coverArtId: 'cover-42',
+      );
+
+      expect(key.raw, 'subsonic|server-a|cover-42|160');
+    },
+  );
 }

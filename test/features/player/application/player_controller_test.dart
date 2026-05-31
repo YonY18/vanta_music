@@ -94,6 +94,9 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
   Future<void> addToQueueEnd(Track track) async {
     addEndTrack = track;
   }
+
+  @override
+  Future<void> retryFailedTrack() async {}
 }
 
 Track _track(String id, String uri) {

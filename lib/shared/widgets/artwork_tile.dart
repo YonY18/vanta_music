@@ -32,32 +32,38 @@ class ArtworkTile extends StatelessWidget {
       logicalSize: size,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
     );
-    if (showPlaceholderOnly) return _placeholder(context, radius);
+    if (showPlaceholderOnly) return _frame(_placeholder(context, radius));
 
     final path = cachedArtworkPath;
     if (path != null && path.isNotEmpty) {
-      return RepaintBoundary(
-        child: ClipRRect(
-          borderRadius: radius,
-          child: Image.file(
-            File(path),
-            width: size,
-            height: size,
-            cacheWidth: querySize,
-            cacheHeight: querySize,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) {
-              if (id == null) return _placeholder(context, radius);
-              return _queryArtwork(context, radius, querySize);
-            },
+      return _frame(
+        RepaintBoundary(
+          child: ClipRRect(
+            borderRadius: radius,
+            child: Image.file(
+              File(path),
+              width: size,
+              height: size,
+              cacheWidth: querySize,
+              cacheHeight: querySize,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) {
+                if (id == null) return _placeholder(context, radius);
+                return _queryArtwork(context, radius, querySize);
+              },
+            ),
           ),
         ),
       );
     }
 
-    if (id == null) return _placeholder(context, radius);
+    if (id == null) return _frame(_placeholder(context, radius));
 
-    return _queryArtwork(context, radius, querySize);
+    return _frame(_queryArtwork(context, radius, querySize));
+  }
+
+  Widget _frame(Widget child) {
+    return SizedBox.square(dimension: size, child: child);
   }
 
   Widget _queryArtwork(

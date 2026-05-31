@@ -68,6 +68,61 @@ void main() {
     expect(file.path, contains('${p.separator}artwork${p.separator}'));
   });
 
+  test('stores remote artwork under a server-scoped directory', () async {
+    final store = FileArtworkCacheStore(
+      appSupportDirectory: () async => tempDir,
+    );
+    final key = buildArtworkCacheKey(
+      providerId: 'subsonic:home',
+      trackId: 'song-1',
+      artworkId: null,
+      sizePx: 160,
+      serverId: 'home',
+      coverArtId: 'cover-1',
+    );
+
+    final file = await store.resolveFile(key);
+
+    expect(
+      file.path,
+      contains(
+        '${p.separator}artwork${p.separator}subsonic${p.separator}home${p.separator}',
+      ),
+    );
+  });
+
+  test('deletes only the targeted remote server artwork cache', () async {
+    final store = FileArtworkCacheStore(
+      appSupportDirectory: () async => tempDir,
+    );
+    final homeKey = buildArtworkCacheKey(
+      providerId: 'subsonic:home',
+      trackId: 'song-1',
+      artworkId: null,
+      sizePx: 160,
+      serverId: 'home',
+      coverArtId: 'cover-1',
+    );
+    final workKey = buildArtworkCacheKey(
+      providerId: 'subsonic:work',
+      trackId: 'song-2',
+      artworkId: null,
+      sizePx: 160,
+      serverId: 'work',
+      coverArtId: 'cover-2',
+    );
+
+    await store.writeBytes(homeKey, Uint8List.fromList([1, 2, 3]));
+    await store.writeBytes(workKey, Uint8List.fromList([4, 5, 6]));
+
+    await store.deleteServer('home');
+
+    expect(await store.readPath(homeKey), isNull);
+    final workPath = await store.readPath(workKey);
+    expect(workPath, isNotNull);
+    expect(await File(workPath!).readAsBytes(), [4, 5, 6]);
+  });
+
   test('evicts oldest files when cache size exceeds max limit', () async {
     final store = FileArtworkCacheStore(
       appSupportDirectory: () async => tempDir,

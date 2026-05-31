@@ -73,4 +73,46 @@ void main() {
       expect(snapshot.history.first.completed, true);
     },
   );
+
+  test(
+    'preserves remote source identity without colliding with local tracks',
+    () {
+      final reducer = const LibraryIntelligenceReducer();
+      final snapshot = reducer.reduce(const LibrarySnapshot.empty(), [
+        LibraryEvent.playStarted(
+          trackKey: 'local::shared-id',
+          timestamp: DateTime.utc(2026, 1, 1, 10),
+        ),
+        LibraryEvent.progressUpdated(
+          trackKey: 'subsonic:server-a::subsonic:server-a:shared-id',
+          positionMs: 45000,
+          durationMs: 180000,
+          timestamp: DateTime.utc(2026, 1, 1, 11),
+        ),
+        LibraryEvent.playbackCompleted(
+          trackKey: 'subsonic:server-a::subsonic:server-a:shared-id',
+          timestamp: DateTime.utc(2026, 1, 1, 11, 3),
+          listenedDurationMs: 45000,
+          durationMs: 180000,
+        ),
+      ]);
+
+      final local = snapshot.tracks['local::shared-id'];
+      final remote =
+          snapshot.tracks['subsonic:server-a::subsonic:server-a:shared-id'];
+
+      expect(snapshot.tracks.length, 2);
+      expect(local, isNotNull);
+      expect(local!.providerId, 'local');
+      expect(local.trackId, 'shared-id');
+      expect(local.serverId, isNull);
+      expect(remote, isNotNull);
+      expect(remote!.providerId, 'subsonic:server-a');
+      expect(remote.trackId, 'subsonic:server-a:shared-id');
+      expect(remote.serverId, 'server-a');
+      expect(snapshot.history.single.providerId, 'subsonic:server-a');
+      expect(snapshot.history.single.serverId, 'server-a');
+      expect(snapshot.history.single.trackId, 'subsonic:server-a:shared-id');
+    },
+  );
 }

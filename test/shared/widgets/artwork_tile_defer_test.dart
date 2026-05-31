@@ -21,5 +21,22 @@ void main() {
 
     expect(find.byType(QueryArtworkWidget), findsNothing);
     expect(find.byIcon(Icons.music_note_rounded), findsOneWidget);
+    expect(tester.getSize(find.byType(ArtworkTile)), const Size.square(56));
+  });
+
+  testWidgets('keeps a fixed box for queried artwork', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: ArtworkTile(
+            id: 42,
+            type: ArtworkType.AUDIO,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(QueryArtworkWidget), findsOneWidget);
+    expect(tester.getSize(find.byType(ArtworkTile)), const Size.square(56));
   });
 }

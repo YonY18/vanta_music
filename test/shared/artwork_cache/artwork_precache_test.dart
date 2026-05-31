@@ -92,6 +92,37 @@ void main() {
 
       expect(resolver.maxConcurrentCalls, lessThanOrEqualTo(2));
     });
+
+    test(
+      'prioritizes now playing before the remaining queue for light precache',
+      () {
+        final selected = selectQueueTracksForArtworkPrecache(
+          nowPlaying: _remoteTrack(
+            'remote-current',
+            coverArtId: 'cover-current',
+          ),
+          queue: [
+            _remoteTrack('remote-current', coverArtId: 'cover-current'),
+            _track(
+              'local-no-art',
+              artworkId: null,
+              uri: Uri.parse('content://song/2'),
+            ),
+            _track(
+              'local-file',
+              artworkId: null,
+              uri: Uri.file('/music/3.mp3'),
+            ),
+          ],
+          maxCount: 2,
+        );
+
+        expect(selected.map((track) => track.id).toList(), [
+          'subsonic:server-1:remote-current',
+          'local-file',
+        ]);
+      },
+    );
   });
 }
 
@@ -171,6 +202,9 @@ class _NoopStore implements ArtworkCacheStore {
 
   @override
   Future<void> writeBytes(ArtworkCacheKey key, Uint8List bytes) async {}
+
+  @override
+  Future<void> deleteServer(String serverId) async {}
 }
 
 class _NoopSource implements ArtworkBytesSource {

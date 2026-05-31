@@ -6,6 +6,7 @@ import 'package:just_audio/just_audio.dart';
 import '../../library_intelligence/application/library_intelligence_sink.dart';
 import '../../library/application/file_validation_cache.dart';
 import '../../library/domain/track.dart';
+import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../application/player_controller.dart';
 import '../application/playback_session_store.dart';
 import '../domain/playback_session.dart';
@@ -42,6 +43,7 @@ class VantaAudioHandler extends BaseAudioHandler
   Timer? _persistDebounce;
   bool _restoring = false;
   String? _lastCompletedTrackKey;
+  RemoteTrackFailure? _lastRemoteFailure;
 
   Future<void> restoreSessionIfAvailable() async {
     final store = _sessionStore;
@@ -84,12 +86,35 @@ class VantaAudioHandler extends BaseAudioHandler
     if (tracks.isEmpty) return;
 
     final items = tracks.map(mediaItemFromTrack).toList(growable: false);
-    queue.add(items);
-    mediaItem.add(items[initialIndex]);
+    final resolved = await resolveQueueItemsSafely(
+      items,
+      _streamResolverRegistry,
+    );
+    _updateRemoteFailure(resolved.failures);
+    if (resolved.queueItems.isEmpty) {
+      if (resolved.failures.isNotEmpty) {
+        mediaItem.add(resolved.failures.first.item);
+        _broadcastState(_player.playbackEvent);
+      }
+      return;
+    }
+
+    final safeInitialIndex = initialIndex.clamp(
+      0,
+      resolved.queueItems.length - 1,
+    );
+    queue.add(resolved.queueItems);
+    mediaItem.add(resolved.queueItems[safeInitialIndex]);
 
     await _player.setAudioSources(
-      await _audioSourcesFor(items),
-      initialIndex: initialIndex,
+      [
+        for (var index = 0; index < resolved.queueItems.length; index++)
+          AudioSource.uri(
+            resolved.uris[index],
+            tag: resolved.queueItems[index],
+          ),
+      ],
+      initialIndex: safeInitialIndex,
       initialPosition: Duration.zero,
     );
     await play();
@@ -102,9 +127,21 @@ class VantaAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> playMediaItem(MediaItem mediaItem) async {
-    queue.add([mediaItem]);
-    this.mediaItem.add(mediaItem);
-    await _player.setAudioSource(await _audioSourceFor(mediaItem));
+    final resolved = await resolveQueueItemsSafely([
+      mediaItem,
+    ], _streamResolverRegistry);
+    _updateRemoteFailure(resolved.failures);
+    if (resolved.queueItems.isEmpty) {
+      this.mediaItem.add(mediaItem);
+      _broadcastState(_player.playbackEvent);
+      return;
+    }
+
+    queue.add(resolved.queueItems);
+    this.mediaItem.add(resolved.queueItems.single);
+    await _player.setAudioSource(
+      AudioSource.uri(resolved.uris.single, tag: resolved.queueItems.single),
+    );
     await play();
     _scheduleSessionPersist();
   }
@@ -164,6 +201,47 @@ class VantaAudioHandler extends BaseAudioHandler
   }
 
   @override
+  Future<void> retryFailedTrack() async {
+    final failure = _lastRemoteFailure;
+    if (failure == null || !failure.retryable) return;
+
+    final resolved = await resolveQueueItemsSafely([
+      failure.item,
+    ], _streamResolverRegistry);
+    _updateRemoteFailure(resolved.failures);
+    if (resolved.queueItems.isEmpty) return;
+
+    if (queue.value.isEmpty) {
+      queue.add(resolved.queueItems);
+      mediaItem.add(resolved.queueItems.single);
+      await _player.setAudioSource(
+        AudioSource.uri(resolved.uris.single, tag: resolved.queueItems.single),
+      );
+    } else {
+      final currentIndex = _player.currentIndex;
+      final insertIndex = _playNextIndex(queue.value.length, currentIndex);
+      queue.add(
+        insertPlayNext(
+          queue.value,
+          resolved.queueItems.single,
+          currentIndex: currentIndex,
+        ),
+      );
+      await _player.insertAudioSource(
+        insertIndex,
+        AudioSource.uri(resolved.uris.single, tag: resolved.queueItems.single),
+      );
+      await _player.seek(Duration.zero, index: insertIndex);
+      mediaItem.add(resolved.queueItems.single);
+    }
+
+    _lastRemoteFailure = null;
+    await play();
+    _broadcastState(_player.playbackEvent);
+    _scheduleSessionPersist();
+  }
+
+  @override
   Future<void> skipToNext() =>
       _player.seekToNext().then((_) => _scheduleSessionPersist());
 
@@ -218,18 +296,51 @@ class VantaAudioHandler extends BaseAudioHandler
   static Future<List<Uri>> resolveQueueItemUris(
     List<MediaItem> items,
     StreamResolverRegistry registry,
-  ) {
-    return Future.wait(
-      items.map((item) {
-        final providerId = item.extras?['providerId']?.toString();
-        if (!_isSubsonicQueueItem(item) &&
-            (providerId == null ||
-                providerId.isEmpty ||
-                providerId == 'local')) {
-          return Future<Uri>.value(Uri.parse(item.id));
-        }
-        return registry.resolve(item);
-      }),
+  ) async {
+    final resolved = await resolveQueueItemsSafely(items, registry);
+    if (resolved.failures.isNotEmpty) {
+      throw StateError(resolved.failures.first.message);
+    }
+    return resolved.uris;
+  }
+
+  static Future<ResolvedQueueItems> resolveQueueItemsSafely(
+    List<MediaItem> items,
+    StreamResolverRegistry registry,
+  ) async {
+    final queueItems = <MediaItem>[];
+    final uris = <Uri>[];
+    final failures = <RemoteTrackFailure>[];
+
+    for (final item in items) {
+      final providerId = item.extras?['providerId']?.toString();
+      if (!_isSubsonicQueueItem(item) &&
+          (providerId == null || providerId.isEmpty || providerId == 'local')) {
+        queueItems.add(item);
+        uris.add(Uri.parse(item.id));
+        continue;
+      }
+
+      try {
+        final uri = await registry.resolve(item);
+        queueItems.add(item);
+        uris.add(uri);
+      } on RemoteTrackResolveException catch (error) {
+        failures.add(error.failure);
+      } on StateError catch (error) {
+        failures.add(
+          RemoteTrackFailure.nonRetryable(
+            item: item,
+            message: error.message.toString(),
+          ),
+        );
+      }
+    }
+
+    return ResolvedQueueItems(
+      queueItems: List<MediaItem>.unmodifiable(queueItems),
+      uris: List<Uri>.unmodifiable(uris),
+      failures: List<RemoteTrackFailure>.unmodifiable(failures),
     );
   }
 
@@ -299,6 +410,12 @@ class VantaAudioHandler extends BaseAudioHandler
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
         queueIndex: event.currentIndex,
+        errorCode: _lastRemoteFailure == null
+            ? null
+            : (_lastRemoteFailure!.retryable
+                  ? retryablePlaybackErrorCode
+                  : nonRetryablePlaybackErrorCode),
+        errorMessage: _lastRemoteFailure?.message,
       ),
     );
     if (!_restoring) {
@@ -426,10 +543,72 @@ class VantaAudioHandler extends BaseAudioHandler
       ProcessingState.completed => AudioProcessingState.completed,
     };
   }
+
+  void _updateRemoteFailure(List<RemoteTrackFailure> failures) {
+    _lastRemoteFailure = failures.isEmpty ? null : failures.first;
+  }
 }
 
 abstract class StreamResolverRegistry {
   Future<Uri> resolve(MediaItem item);
+}
+
+const int retryablePlaybackErrorCode = 1;
+const int nonRetryablePlaybackErrorCode = 2;
+
+class RemoteTrackFailure {
+  const RemoteTrackFailure({
+    required this.item,
+    required this.message,
+    required this.retryable,
+  });
+
+  factory RemoteTrackFailure.nonRetryable({
+    required MediaItem item,
+    required String message,
+  }) {
+    return RemoteTrackFailure(item: item, message: message, retryable: false);
+  }
+
+  final MediaItem item;
+  final String message;
+  final bool retryable;
+}
+
+class RemoteTrackResolveException implements Exception {
+  const RemoteTrackResolveException(this.failure);
+
+  factory RemoteTrackResolveException.retryable({
+    required MediaItem item,
+    required String message,
+  }) {
+    return RemoteTrackResolveException(
+      RemoteTrackFailure(item: item, message: message, retryable: true),
+    );
+  }
+
+  factory RemoteTrackResolveException.fromSubsonicFailure({
+    required MediaItem item,
+    required Exception error,
+  }) {
+    final retryable =
+        error is TimeoutException ||
+        error is SubsonicTimeoutFailure ||
+        error is SubsonicUnavailableFailure;
+    return RemoteTrackResolveException(
+      RemoteTrackFailure(
+        item: item,
+        message:
+            'Could not play ${item.title}. ${retryable ? 'Retry this track.' : 'Skip to keep the queue moving.'}',
+        retryable: retryable,
+      ),
+    );
+  }
+
+  final RemoteTrackFailure failure;
+
+  bool get retryable => failure.retryable;
+  String get message => failure.message;
 }
 
 class LocalStreamResolverRegistry implements StreamResolverRegistry {
@@ -437,6 +616,18 @@ class LocalStreamResolverRegistry implements StreamResolverRegistry {
 
   @override
   Future<Uri> resolve(MediaItem item) async => Uri.parse(item.id);
+}
+
+class ResolvedQueueItems {
+  const ResolvedQueueItems({
+    required this.queueItems,
+    required this.uris,
+    required this.failures,
+  });
+
+  final List<MediaItem> queueItems;
+  final List<Uri> uris;
+  final List<RemoteTrackFailure> failures;
 }
 
 class _SafeSessionResult extends PlaybackSession {

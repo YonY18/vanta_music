@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -6,11 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
+import '../../../shared/artwork_cache/artwork_precache.dart';
 import '../../../shared/utils/duration_format.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
+import '../../library/domain/track.dart';
 import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../application/media_item_artwork_request.dart';
 import '../application/player_controller.dart';
+import '../infrastructure/vanta_audio_handler.dart';
 
 class NowPlayingScreen extends ConsumerWidget {
   const NowPlayingScreen({super.key});
@@ -28,6 +32,7 @@ class NowPlayingScreen extends ConsumerWidget {
                 ),
               )
               .valueOrNull;
+    final playbackState = ref.watch(playbackStateProvider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -54,6 +59,7 @@ class NowPlayingScreen extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
                 child: Column(
                   children: [
+                    const _NowPlayingArtworkWarmup(),
                     const SizedBox(height: 24),
                     _NowPlayingArtwork(item: item),
                     const SizedBox(height: 32),
@@ -79,6 +85,16 @@ class NowPlayingScreen extends ConsumerWidget {
                       ).textTheme.bodyLarge?.copyWith(color: VantaColors.muted),
                     ),
                     const SizedBox(height: 24),
+                    if (playbackState?.errorMessage case final message?
+                        when message.trim().isNotEmpty) ...[
+                      _PlaybackErrorCard(
+                        message: message,
+                        canRetry:
+                            playbackState?.errorCode ==
+                            retryablePlaybackErrorCode,
+                      ),
+                      const SizedBox(height: 24),
+                    ],
                     const _NowPlayingPositionSection(),
                     const SizedBox(height: 24),
                     const _NowPlayingControls(),
@@ -88,6 +104,96 @@ class NowPlayingScreen extends ConsumerWidget {
               ),
             ),
     );
+  }
+}
+
+class _PlaybackErrorCard extends ConsumerWidget {
+  const _PlaybackErrorCard({required this.message, required this.canRetry});
+
+  final String message;
+  final bool canRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: VantaColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: VantaColors.border, width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: VantaColors.text),
+          ),
+          if (canRetry) ...[
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () =>
+                  ref.read(playerControllerProvider).retryFailedTrack(),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry track'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _NowPlayingArtworkWarmup extends ConsumerStatefulWidget {
+  const _NowPlayingArtworkWarmup();
+
+  @override
+  ConsumerState<_NowPlayingArtworkWarmup> createState() =>
+      _NowPlayingArtworkWarmupState();
+}
+
+class _NowPlayingArtworkWarmupState
+    extends ConsumerState<_NowPlayingArtworkWarmup> {
+  String? _lastFingerprint;
+
+  @override
+  Widget build(BuildContext context) {
+    final nowPlaying = ref.watch(mediaItemProvider).valueOrNull;
+    final queue =
+        ref.watch(currentQueueProvider).valueOrNull ?? const <MediaItem>[];
+    final selected = selectQueueTracksForArtworkPrecache(
+      nowPlaying: nowPlaying == null ? null : trackFromMediaItem(nowPlaying),
+      queue: queue
+          .map(trackFromMediaItem)
+          .whereType<Track>()
+          .toList(growable: false),
+      maxCount: 3,
+    );
+    if (selected.isEmpty) return const SizedBox.shrink();
+
+    final fingerprint = selected
+        .map((track) => '${track.providerId}|${track.id}|${track.uri}')
+        .join('||');
+    if (_lastFingerprint == fingerprint) return const SizedBox.shrink();
+    _lastFingerprint = fingerprint;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        ref
+            .read(artworkCacheWarmupServiceProvider)
+            .warmup(
+              selected,
+              maxCount: selected.length,
+              sizePx: defaultArtworkPrecacheSizePx,
+              maxConcurrency: 1,
+            ),
+      );
+    });
+    return const SizedBox.shrink();
   }
 }
 

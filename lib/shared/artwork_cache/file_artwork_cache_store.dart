@@ -12,6 +12,7 @@ abstract class ArtworkCacheStore {
   int get maxCacheSizeBytes;
   Future<String?> readPath(ArtworkCacheKey key);
   Future<void> writeBytes(ArtworkCacheKey key, Uint8List bytes);
+  Future<void> deleteServer(String serverId);
 }
 
 class FileArtworkCacheStore implements ArtworkCacheStore {
@@ -32,8 +33,14 @@ class FileArtworkCacheStore implements ArtworkCacheStore {
 
   Future<File> resolveFile(ArtworkCacheKey key) async {
     final root = await _appSupportDirectory();
+    final subdirectory = _cacheSubdirectoryFor(key);
     return File(
-      p.join(root.path, _artworkDirectoryName, artworkCacheFileName(key)),
+      p.joinAll(<String>[
+        root.path,
+        _artworkDirectoryName,
+        ...subdirectory,
+        artworkCacheFileName(key),
+      ]),
     );
   }
 
@@ -61,6 +68,30 @@ class FileArtworkCacheStore implements ArtworkCacheStore {
       }
       await temp.rename(file.path);
       await _pruneIfNeeded(file.parent);
+    } on IOException {
+      return;
+    }
+  }
+
+  @override
+  Future<void> deleteServer(String serverId) async {
+    final normalizedServerId = serverId.trim();
+    if (normalizedServerId.isEmpty) {
+      throw ArgumentError.value(serverId, 'serverId', 'must not be empty');
+    }
+
+    try {
+      final root = await _appSupportDirectory();
+      final directory = Directory(
+        p.join(
+          root.path,
+          _artworkDirectoryName,
+          'subsonic',
+          _safeDirectoryName(normalizedServerId),
+        ),
+      );
+      if (!await directory.exists()) return;
+      await directory.delete(recursive: true);
     } on IOException {
       return;
     }
@@ -115,6 +146,30 @@ class FileArtworkCacheStore implements ArtworkCacheStore {
       return;
     }
   }
+
+  List<String> _cacheSubdirectoryFor(ArtworkCacheKey key) {
+    final remoteServerId = subsonicArtworkServerId(key);
+    if (remoteServerId == null) return const <String>[];
+    return <String>['subsonic', _safeDirectoryName(remoteServerId)];
+  }
+}
+
+String? subsonicArtworkServerId(ArtworkCacheKey key) {
+  final separatorIndex = key.raw.indexOf('|');
+  if (separatorIndex == -1 ||
+      key.raw.substring(0, separatorIndex) != 'subsonic') {
+    return null;
+  }
+
+  final serverStart = separatorIndex + 1;
+  final serverEnd = key.raw.indexOf('|', serverStart);
+  if (serverEnd == -1 || serverEnd == serverStart) return null;
+  return key.raw.substring(serverStart, serverEnd);
+}
+
+String _safeDirectoryName(String value) {
+  final safe = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_');
+  return safe.isEmpty ? 'server' : safe;
 }
 
 class _CacheFileStat {

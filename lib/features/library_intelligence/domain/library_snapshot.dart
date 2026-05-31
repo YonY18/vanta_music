@@ -132,18 +132,58 @@ class LibrarySnapshot {
   );
 }
 
+class LibrarySourceIdentity {
+  const LibrarySourceIdentity({
+    required this.providerId,
+    required this.trackId,
+    this.serverId,
+  });
+
+  final String providerId;
+  final String trackId;
+  final String? serverId;
+}
+
+LibrarySourceIdentity? parseLibrarySourceIdentity(String trackKey) {
+  final separatorIndex = trackKey.indexOf('::');
+  if (separatorIndex <= 0 || separatorIndex >= trackKey.length - 2) {
+    return null;
+  }
+
+  final providerId = trackKey.substring(0, separatorIndex);
+  final trackId = trackKey.substring(separatorIndex + 2);
+  if (providerId.isEmpty || trackId.isEmpty) return null;
+
+  const remotePrefix = 'subsonic:';
+  final serverId = providerId.startsWith(remotePrefix)
+      ? providerId.substring(remotePrefix.length)
+      : null;
+
+  return LibrarySourceIdentity(
+    providerId: providerId,
+    trackId: trackId,
+    serverId: serverId == null || serverId.isEmpty ? null : serverId,
+  );
+}
+
 class PlaybackHistoryEntry {
   const PlaybackHistoryEntry({
     required this.trackKey,
     required this.listenedAt,
     required this.listenedDurationMs,
     required this.completed,
+    this.providerId,
+    this.trackId,
+    this.serverId,
   });
 
   final String trackKey;
   final DateTime listenedAt;
   final int listenedDurationMs;
   final bool completed;
+  final String? providerId;
+  final String? trackId;
+  final String? serverId;
 
   Map<String, dynamic> toJson() {
     return {
@@ -151,6 +191,9 @@ class PlaybackHistoryEntry {
       'listenedAt': listenedAt.toIso8601String(),
       'listenedDurationMs': listenedDurationMs,
       'completed': completed,
+      'providerId': providerId,
+      'trackId': trackId,
+      'serverId': serverId,
     };
   }
 
@@ -172,6 +215,9 @@ class PlaybackHistoryEntry {
       listenedAt: listenedAt,
       listenedDurationMs: listenedDurationMs,
       completed: completed,
+      providerId: json['providerId']?.toString(),
+      trackId: json['trackId']?.toString(),
+      serverId: json['serverId']?.toString(),
     );
   }
 
@@ -181,12 +227,22 @@ class PlaybackHistoryEntry {
         other.trackKey == trackKey &&
         other.listenedAt == listenedAt &&
         other.listenedDurationMs == listenedDurationMs &&
-        other.completed == completed;
+        other.completed == completed &&
+        other.providerId == providerId &&
+        other.trackId == trackId &&
+        other.serverId == serverId;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(trackKey, listenedAt, listenedDurationMs, completed);
+  int get hashCode => Object.hash(
+    trackKey,
+    listenedAt,
+    listenedDurationMs,
+    completed,
+    providerId,
+    trackId,
+    serverId,
+  );
 }
 
 class LibraryTrackSnapshot {
@@ -199,6 +255,9 @@ class LibraryTrackSnapshot {
     required this.isFavorite,
     required this.favoritedAt,
     required this.isCompleted,
+    this.providerId,
+    this.trackId,
+    this.serverId,
   });
 
   final String trackKey;
@@ -209,6 +268,9 @@ class LibraryTrackSnapshot {
   final bool isFavorite;
   final DateTime? favoritedAt;
   final bool isCompleted;
+  final String? providerId;
+  final String? trackId;
+  final String? serverId;
 
   static const Object _keepFavoritedAt = Object();
 
@@ -220,6 +282,9 @@ class LibraryTrackSnapshot {
     bool? isFavorite,
     Object? favoritedAt = _keepFavoritedAt,
     bool? isCompleted,
+    Object? providerId = _keepFavoritedAt,
+    Object? trackId = _keepFavoritedAt,
+    Object? serverId = _keepFavoritedAt,
   }) {
     return LibraryTrackSnapshot(
       trackKey: trackKey,
@@ -232,6 +297,15 @@ class LibraryTrackSnapshot {
           ? this.favoritedAt
           : favoritedAt as DateTime?,
       isCompleted: isCompleted ?? this.isCompleted,
+      providerId: identical(providerId, _keepFavoritedAt)
+          ? this.providerId
+          : providerId as String?,
+      trackId: identical(trackId, _keepFavoritedAt)
+          ? this.trackId
+          : trackId as String?,
+      serverId: identical(serverId, _keepFavoritedAt)
+          ? this.serverId
+          : serverId as String?,
     );
   }
 
@@ -245,6 +319,9 @@ class LibraryTrackSnapshot {
       'isFavorite': isFavorite,
       'favoritedAt': favoritedAt?.toIso8601String(),
       'isCompleted': isCompleted,
+      'providerId': providerId,
+      'trackId': trackId,
+      'serverId': serverId,
     };
   }
 
@@ -278,6 +355,9 @@ class LibraryTrackSnapshot {
       isFavorite: isFavorite,
       favoritedAt: DateTime.tryParse((json['favoritedAt'] ?? '').toString()),
       isCompleted: isCompleted,
+      providerId: json['providerId']?.toString(),
+      trackId: json['trackId']?.toString(),
+      serverId: json['serverId']?.toString(),
     );
   }
 
@@ -292,7 +372,10 @@ class LibraryTrackSnapshot {
         other.durationMs == durationMs &&
         other.isFavorite == isFavorite &&
         other.favoritedAt == favoritedAt &&
-        other.isCompleted == isCompleted;
+        other.isCompleted == isCompleted &&
+        other.providerId == providerId &&
+        other.trackId == trackId &&
+        other.serverId == serverId;
   }
 
   @override
@@ -305,6 +388,9 @@ class LibraryTrackSnapshot {
     isFavorite,
     favoritedAt,
     isCompleted,
+    providerId,
+    trackId,
+    serverId,
   );
 }
 

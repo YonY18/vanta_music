@@ -148,7 +148,8 @@ class PlaybackSession {
     final normalized = key.toLowerCase();
     return normalized.contains('stream') ||
         normalized.contains('token') ||
-        normalized.contains('password');
+        normalized.contains('password') ||
+        normalized.contains('error');
   }
 
   static bool _isAuthBearingUriString(String value) {

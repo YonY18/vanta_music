@@ -149,4 +149,35 @@ void main() {
       'subsonic://track?serverId=server-a&id=remote-1',
     );
   });
+
+  test(
+    'drops error extras that could persist auth-bearing playback diagnostics',
+    () {
+      const item = MediaItem(
+        id: 'subsonic://track?serverId=server-a&id=remote-1',
+        title: 'Remote Song',
+        extras: {
+          'trackId': 'subsonic:server-a:remote-1',
+          'providerId': 'subsonic:server-a',
+          'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+          'playbackError':
+              'Failed at https://music.example/rest/stream.view?id=remote-1&t=secret-token&u=user',
+        },
+      );
+      final session = PlaybackSession(
+        queue: const [item],
+        currentIndex: 0,
+        position: Duration.zero,
+      );
+
+      final json = session.toJson();
+      final serialized = json.toString();
+      final restored = PlaybackSession.fromJson(json);
+
+      expect(serialized, isNot(contains('secret-token')));
+      expect(serialized, isNot(contains('music.example')));
+      expect(restored, isNotNull);
+      expect(restored!.queue.single.extras, isNot(contains('playbackError')));
+    },
+  );
 }

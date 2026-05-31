@@ -67,6 +67,8 @@ class ArtworkCacheResolver {
   final EmbeddedArtworkBytesSource embeddedSource;
   final RemoteArtworkBytesSource? remoteSource;
   final Set<String> _memoizedMisses = <String>{};
+  final Map<String, Future<ArtworkResolution>> _inFlight =
+      <String, Future<ArtworkResolution>>{};
 
   Future<String?> resolvePath({
     required Track track,
@@ -87,6 +89,8 @@ class ArtworkCacheResolver {
       trackId: track.id,
       artworkId: artworkId,
       sizePx: sizePx,
+      serverId: remoteArtworkUri?.queryParameters['serverId'],
+      coverArtId: remoteArtworkUri?.queryParameters['id'],
       sourceUri: _cacheSourceUri(
         track: track,
         remoteArtworkUri: remoteArtworkUri,
@@ -96,9 +100,40 @@ class ArtworkCacheResolver {
 
     if (_memoizedMisses.contains(rawKey)) {
       _debugLog(track, 'memoized miss');
-      return ArtworkResolution(key: rawKey, resolvedAt: DateTime.now());
+      return ArtworkResolution(
+        key: rawKey,
+        isFallback: true,
+        resolvedAt: DateTime.now(),
+      );
     }
 
+    final pending = _inFlight[rawKey];
+    if (pending != null) return pending;
+
+    final future = _resolveInternal(
+      track: track,
+      sizePx: sizePx,
+      key: key,
+      rawKey: rawKey,
+      artworkId: artworkId,
+      remoteArtworkUri: remoteArtworkUri,
+    );
+    _inFlight[rawKey] = future;
+    try {
+      return await future;
+    } finally {
+      _inFlight.remove(rawKey);
+    }
+  }
+
+  Future<ArtworkResolution> _resolveInternal({
+    required Track track,
+    required int sizePx,
+    required ArtworkCacheKey key,
+    required String rawKey,
+    required int? artworkId,
+    required Uri? remoteArtworkUri,
+  }) async {
     final cachedPath = await store.readPath(key);
     if (cachedPath != null) {
       _debugLog(track, 'cache hit path=$cachedPath');
@@ -160,7 +195,11 @@ class ArtworkCacheResolver {
     if (bytes == null || bytes.isEmpty) {
       _debugLog(track, 'final miss');
       _memoizedMisses.add(rawKey);
-      return ArtworkResolution(key: rawKey, resolvedAt: DateTime.now());
+      return ArtworkResolution(
+        key: rawKey,
+        isFallback: true,
+        resolvedAt: DateTime.now(),
+      );
     }
 
     await store.writeBytes(key, bytes);

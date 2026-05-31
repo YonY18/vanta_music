@@ -45,6 +45,7 @@ abstract interface class PlayerAudioControl {
   Future<void> removeQueueItemById(String mediaItemId);
   Future<void> playNext(Track track);
   Future<void> addToQueueEnd(Track track);
+  Future<void> retryFailedTrack();
 }
 
 class PlayerController {
@@ -64,4 +65,5 @@ class PlayerController {
       _handler.removeQueueItemById(mediaItemId);
   Future<void> playNext(Track track) => _handler.playNext(track);
   Future<void> addToQueueEnd(Track track) => _handler.addToQueueEnd(track);
+  Future<void> retryFailedTrack() => _handler.retryFailedTrack();
 }

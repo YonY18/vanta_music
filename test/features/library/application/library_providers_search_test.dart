@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/library/application/library_providers.dart';
@@ -104,6 +106,116 @@ void main() {
             .map((track) => track.id),
         ['subsonic:server-a:remote-1'],
       );
+    },
+  );
+
+  test(
+    'debounces remote search requests before calling the provider',
+    () async {
+      final calls = <String>[];
+      final container = ProviderContainer(
+        overrides: [
+          remoteSearchDebounceDurationProvider.overrideWithValue(
+            const Duration(milliseconds: 30),
+          ),
+          remoteTrackSearchProvider.overrideWithValue((query) async {
+            calls.add(query);
+            return [
+              _track(
+                id: query,
+                providerId: 'subsonic:server-a',
+                title: query,
+                uri: Uri.parse('subsonic://track?serverId=server-a&id=$query'),
+              ),
+            ];
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final listener = container.listen(
+        remoteSearchStateProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(listener.close);
+
+      container.read(remoteSearchStateProvider.notifier).setQuery('first');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      container.read(remoteSearchStateProvider.notifier).setQuery('second');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(calls, isEmpty);
+
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(calls, ['second']);
+      expect(
+        container.read(remoteSearchStateProvider).tracks.single.id,
+        'second',
+      );
+    },
+  );
+
+  test(
+    'ignores stale remote search results after a newer query wins',
+    () async {
+      final oldCompleter = Completer<List<Track>>();
+      final newCompleter = Completer<List<Track>>();
+      final calls = <String>[];
+      final container = ProviderContainer(
+        overrides: [
+          remoteSearchDebounceDurationProvider.overrideWithValue(Duration.zero),
+          remoteTrackSearchProvider.overrideWithValue((query) {
+            calls.add(query);
+            if (query == 'old') return oldCompleter.future;
+            return newCompleter.future;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final listener = container.listen(
+        remoteSearchStateProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(listener.close);
+
+      container.read(remoteSearchStateProvider.notifier).setQuery('old');
+      await Future<void>.delayed(Duration.zero);
+      container.read(remoteSearchStateProvider.notifier).setQuery('new');
+      await Future<void>.delayed(Duration.zero);
+
+      oldCompleter.complete([
+        _track(
+          id: 'old-result',
+          providerId: 'subsonic:server-a',
+          title: 'Old Result',
+          uri: Uri.parse('subsonic://track?serverId=server-a&id=old-result'),
+        ),
+      ]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, ['old', 'new']);
+      expect(container.read(remoteSearchStateProvider).isLoading, true);
+      expect(container.read(remoteSearchStateProvider).tracks, isEmpty);
+
+      newCompleter.complete([
+        _track(
+          id: 'new-result',
+          providerId: 'subsonic:server-a',
+          title: 'New Result',
+          uri: Uri.parse('subsonic://track?serverId=server-a&id=new-result'),
+        ),
+      ]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        container.read(remoteSearchStateProvider).tracks.single.id,
+        'new-result',
+      );
+      expect(container.read(remoteSearchStateProvider).query, 'new');
     },
   );
 }

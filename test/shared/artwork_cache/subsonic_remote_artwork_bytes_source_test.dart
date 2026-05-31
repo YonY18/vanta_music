@@ -113,6 +113,8 @@ class _FakeSubsonicClient implements SubsonicApiClientContract {
   @override
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
+    int? size,
+    int? offset,
   }) async => const [];
 
   @override
