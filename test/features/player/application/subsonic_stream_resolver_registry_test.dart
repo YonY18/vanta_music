@@ -1,6 +1,7 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/player/application/subsonic_stream_resolver_registry.dart';
+import 'package:vanta_music/features/player/infrastructure/vanta_audio_handler.dart';
 import 'package:vanta_music/features/providers/infrastructure/subsonic_api_client.dart';
 import 'package:vanta_music/features/providers/infrastructure/subsonic_server_store.dart';
 
@@ -228,6 +229,46 @@ void main() {
       );
     },
   );
+
+  test(
+    'maps retryable Subsonic failures into retryable track resolution errors',
+    () async {
+      final store = await _storeWithServer();
+      final resolver = SubsonicStreamResolverRegistry(
+        store: store,
+        clientFactory: ({required server, required password}) =>
+            _ThrowingSubsonicClient(
+              error: const SubsonicTimeoutFailure(
+                'Subsonic request timed out.',
+              ),
+            ),
+      );
+
+      await expectLater(
+        () => resolver.resolve(
+          const MediaItem(
+            id: 'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+            title: 'Remote Song',
+            extras: {
+              'providerId': 'subsonic:https-music-example-com-alice',
+              'canonicalUri':
+                  'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+              'trackId': 'subsonic:https-music-example-com-alice:song-1',
+            },
+          ),
+        ),
+        throwsA(
+          isA<RemoteTrackResolveException>()
+              .having((error) => error.retryable, 'retryable', isTrue)
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Retry this track.'),
+              ),
+        ),
+      );
+    },
+  );
 }
 
 Future<SubsonicServerStore> _storeWithServer({bool savePassword = true}) async {
@@ -302,6 +343,8 @@ class _FakeSubsonicClient implements SubsonicApiClientContract {
   @override
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
+    int? size,
+    int? offset,
   }) async => const [];
 
   @override
@@ -316,6 +359,41 @@ class _FakeSubsonicClient implements SubsonicApiClientContract {
 
   @override
   Uri streamUri(String songId) => stream;
+
+  @override
+  Uri getCoverArtUri(String coverArtId) => throw UnimplementedError();
+}
+
+class _ThrowingSubsonicClient implements SubsonicApiClientContract {
+  const _ThrowingSubsonicClient({required this.error});
+
+  final SubsonicFailure error;
+
+  @override
+  Future<void> ping() async {}
+
+  @override
+  Future<List<SubsonicArtist>> getArtists() async => const [];
+
+  @override
+  Future<List<SubsonicAlbum>> getAlbumList2({
+    String type = 'alphabeticalByName',
+    int? size,
+    int? offset,
+  }) async => const [];
+
+  @override
+  Future<SubsonicAlbumDetail> getAlbum(String id) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<SubsonicSong> getSong(String id) async => throw UnimplementedError();
+
+  @override
+  Future<List<SubsonicSong>> search3(String query) async => const [];
+
+  @override
+  Uri streamUri(String songId) => throw error;
 
   @override
   Uri getCoverArtUri(String coverArtId) => throw UnimplementedError();

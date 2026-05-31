@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 
 import '../../providers/application/subsonic_providers.dart';
 import '../../providers/domain/provider_identity.dart';
+import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../infrastructure/vanta_audio_handler.dart';
 
@@ -54,7 +55,17 @@ class SubsonicStreamResolverRegistry implements StreamResolverRegistry {
       throw StateError('Cannot resolve Subsonic stream: missing password.');
     }
 
-    return clientFactory(server: server, password: password).streamUri(songId);
+    try {
+      return clientFactory(
+        server: server,
+        password: password,
+      ).streamUri(songId);
+    } on SubsonicFailure catch (error) {
+      throw RemoteTrackResolveException.fromSubsonicFailure(
+        item: item,
+        error: error,
+      );
+    }
   }
 }
 

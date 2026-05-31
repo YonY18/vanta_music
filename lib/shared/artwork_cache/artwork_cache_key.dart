@@ -10,7 +10,15 @@ ArtworkCacheKey buildArtworkCacheKey({
   required int? artworkId,
   required int sizePx,
   String? sourceUri,
+  String? serverId,
+  String? coverArtId,
 }) {
+  if (serverId != null &&
+      serverId.isNotEmpty &&
+      coverArtId != null &&
+      coverArtId.isNotEmpty) {
+    return ArtworkCacheKey('subsonic|$serverId|$coverArtId|$sizePx');
+  }
   final sourceKey = artworkId != null
       ? artworkId.toString()
       : 'src:${sourceUri ?? ''}';

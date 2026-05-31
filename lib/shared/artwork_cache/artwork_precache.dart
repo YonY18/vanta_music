@@ -29,6 +29,27 @@ List<Track> selectTracksForArtworkPrecache(
   return List<Track>.unmodifiable(selected);
 }
 
+List<Track> selectQueueTracksForArtworkPrecache({
+  Track? nowPlaying,
+  required List<Track> queue,
+  int maxCount = defaultArtworkPrecacheLimit,
+}) {
+  if (maxCount <= 0) return const <Track>[];
+
+  final ordered = <Track>[
+    ...(nowPlaying == null ? const <Track>[] : <Track>[nowPlaying]),
+    ...queue,
+  ];
+  final seen = <String>{};
+  final deduped = <Track>[];
+  for (final track in ordered) {
+    final key = '${track.providerId}|${track.id}|${track.uri}';
+    if (!seen.add(key)) continue;
+    deduped.add(track);
+  }
+  return selectTracksForArtworkPrecache(deduped, maxCount: maxCount);
+}
+
 class ArtworkCacheWarmupService {
   const ArtworkCacheWarmupService({required this.resolver});
 

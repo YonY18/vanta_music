@@ -118,6 +118,10 @@ abstract class SubsonicSecretStore {
   Future<void> deletePassword(String serverId);
 }
 
+abstract class SubsonicServerCleanup {
+  Future<void> deleteServerData(String serverId);
+}
+
 class FlutterSecureSubsonicSecretStore implements SubsonicSecretStore {
   const FlutterSecureSubsonicSecretStore({FlutterSecureStorage? storage})
     : _storage = storage ?? const FlutterSecureStorage();
@@ -162,13 +166,27 @@ class SubsonicServerStore {
   const SubsonicServerStore({
     required this.metadataStore,
     required this.secretStore,
+    this.cleanupHooks = const <SubsonicServerCleanup>[],
   });
 
   final SubsonicServerMetadataStore metadataStore;
   final SubsonicSecretStore secretStore;
+  final List<SubsonicServerCleanup> cleanupHooks;
 
   Future<List<SubsonicServerConfig>> loadServers() async {
     return (await metadataStore.read()).servers;
+  }
+
+  Future<SubsonicServerConfig?> loadServer(String serverId) async {
+    final normalizedId = _requireText(serverId, 'serverId');
+    final servers = await loadServers();
+    return servers.where((server) => server.id == normalizedId).firstOrNull;
+  }
+
+  Future<SubsonicServerConfig?> loadActiveServer() async {
+    final activeServerId = await readActiveServer();
+    if (activeServerId == null) return null;
+    return loadServer(activeServerId);
   }
 
   Future<void> saveServer(
@@ -203,6 +221,10 @@ class SubsonicServerStore {
   Future<void> deleteServer(String serverId) async {
     final normalizedId = _requireText(serverId, 'serverId');
     final state = await metadataStore.read();
+    final deletedServer = state.servers.where(
+      (server) => server.id == normalizedId,
+    );
+    if (deletedServer.isEmpty) return;
     final updatedServers = state.servers
         .where((server) => server.id != normalizedId)
         .toList(growable: false);
@@ -216,6 +238,9 @@ class SubsonicServerStore {
       ),
     );
     await secretStore.deletePassword(normalizedId);
+    for (final cleanup in cleanupHooks) {
+      await cleanup.deleteServerData(normalizedId);
+    }
   }
 
   Future<void> selectActiveServer(String serverId) async {

@@ -180,10 +180,7 @@ void main() {
       expect(remote.requestedUris.single.scheme, 'subsonic');
       expect(remote.requestedUris.single.host, 'cover-art');
       expect(remote.requestedUris.single.queryParameters['id'], 'cover-1');
-      expect(
-        store.writtenKeys.single.raw,
-        contains('remote-cover:subsonic:server-1:cover-1'),
-      );
+      expect(store.writtenKeys.single.raw, 'subsonic|server-1|cover-1|160');
       expect(store.writtenKeys.single.raw, isNot(contains('secret')));
     },
   );
@@ -211,6 +208,59 @@ void main() {
     expect(remote.calls, 1);
     expect(store.writes, 1);
   });
+
+  test(
+    'coalesces concurrent remote requests for the same server-scoped key',
+    () async {
+      final remoteTrack = _remoteTrackWithCoverArtId();
+      final store = _FakeStore(afterWritePath: '/tmp/remote.jpg');
+      final remote = _DelayedRemoteSource(
+        result: Uint8List.fromList([4, 5, 6]),
+        delay: const Duration(milliseconds: 10),
+      );
+      final resolver = ArtworkCacheResolver(
+        store: store,
+        source: _FakeSource(result: null),
+        embeddedSource: _FakeEmbeddedSource(result: null),
+        remoteSource: remote,
+      );
+
+      final results = await Future.wait([
+        resolver.resolve(track: remoteTrack, sizePx: 160),
+        resolver.resolve(track: remoteTrack, sizePx: 160),
+      ]);
+
+      expect(
+        results.every((result) => result.path == '/tmp/remote.jpg'),
+        isTrue,
+      );
+      expect(remote.calls, 1);
+      expect(store.writtenKeys.single.raw, 'subsonic|server-1|cover-1|160');
+    },
+  );
+
+  test(
+    'negative-caches remote misses to avoid repeated heavy fetches',
+    () async {
+      final remoteTrack = _remoteTrackWithCoverArtId();
+      final remote = _DelayedRemoteSource(result: null);
+      final resolver = ArtworkCacheResolver(
+        store: _FakeStore(),
+        source: _FakeSource(result: null),
+        embeddedSource: _FakeEmbeddedSource(result: null),
+        remoteSource: remote,
+      );
+
+      final first = await resolver.resolve(track: remoteTrack, sizePx: 160);
+      final second = await resolver.resolve(track: remoteTrack, sizePx: 160);
+
+      expect(first.hasArtwork, isFalse);
+      expect(second.hasArtwork, isFalse);
+      expect(first.isFallback, isTrue);
+      expect(second.isFallback, isTrue);
+      expect(remote.calls, 1);
+    },
+  );
 
   test('sanitizes artwork diagnostics before logging auth-bearing urls', () {
     final sanitized = sanitizeArtworkDiagnosticMessage(
@@ -289,6 +339,9 @@ class _FakeStore implements ArtworkCacheStore {
     writtenKeys.add(key);
     writtenBytes = bytes;
   }
+
+  @override
+  Future<void> deleteServer(String serverId) async {}
 }
 
 class _FakeSource implements ArtworkBytesSource {

@@ -96,6 +96,83 @@ void main() {
     },
   );
 
+  test('classifies HTTP failures into explicit remote failure types', () async {
+    final forbiddenClient = SubsonicApiClient(
+      server: server,
+      password: 'secret',
+      httpClient: _FakeHttpClient((_) async => http.Response(_okJson(), 403)),
+    );
+    final missingClient = SubsonicApiClient(
+      server: server,
+      password: 'secret',
+      httpClient: _FakeHttpClient((_) async => http.Response(_okJson(), 404)),
+    );
+    final unavailableClient = SubsonicApiClient(
+      server: server,
+      password: 'secret',
+      httpClient: _FakeHttpClient((_) async => http.Response(_okJson(), 503)),
+    );
+
+    await expectLater(
+      forbiddenClient.ping(),
+      throwsA(isA<SubsonicForbiddenFailure>()),
+    );
+    await expectLater(
+      missingClient.ping(),
+      throwsA(isA<SubsonicNotFoundFailure>()),
+    );
+    await expectLater(
+      unavailableClient.ping(),
+      throwsA(isA<SubsonicUnavailableFailure>()),
+    );
+  });
+
+  test('retries recoverable failures with a hard attempt cap', () async {
+    var attempts = 0;
+    final client = SubsonicApiClient(
+      server: server,
+      password: 'secret',
+      timeout: const Duration(milliseconds: 1),
+      maxRetryAttempts: 3,
+      retryBackoffBase: Duration.zero,
+      httpClient: _FakeHttpClient((_) async {
+        attempts += 1;
+        if (attempts < 3) {
+          return Future<http.Response>.delayed(
+            const Duration(milliseconds: 20),
+            () => http.Response(_okJson(), 200),
+          );
+        }
+        return http.Response(_okJson(), 200);
+      }),
+    );
+
+    await client.ping();
+
+    expect(attempts, 3);
+  });
+
+  test('stops retrying once the bounded cap is reached', () async {
+    var attempts = 0;
+    final client = SubsonicApiClient(
+      server: server,
+      password: 'secret',
+      maxRetryAttempts: 2,
+      retryBackoffBase: Duration.zero,
+      httpClient: _FakeHttpClient((_) async {
+        attempts += 1;
+        throw const SocketException('host lookup failed');
+      }),
+    );
+
+    await expectLater(
+      client.ping(),
+      throwsA(isA<SubsonicUnavailableFailure>()),
+    );
+
+    expect(attempts, 2);
+  });
+
   test('redacts credentials and auth-bearing URLs from safe error strings', () {
     final url = Uri.parse(
       'https://music.example.test/rest/stream.view?u=alice&s=salt&t=token&c=vanta&f=json&id=song-1',

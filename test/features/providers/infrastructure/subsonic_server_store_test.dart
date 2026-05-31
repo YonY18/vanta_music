@@ -91,6 +91,88 @@ void main() {
     },
   );
 
+  test('switches active server and loads the active config', () async {
+    final metadataFile = File(
+      '${Directory.systemTemp.createTempSync().path}/servers.json',
+    );
+    final store = SubsonicServerStore(
+      metadataStore: FileSubsonicServerMetadataStore(metadataFile),
+      secretStore: InMemorySubsonicSecretStore(),
+    );
+
+    await store.saveServer(
+      const SubsonicServerConfig(
+        id: 'home',
+        name: 'Home',
+        baseUrl: 'https://music.example.test',
+        username: 'alice',
+      ),
+      password: 'home-secret',
+    );
+    await store.saveServer(
+      const SubsonicServerConfig(
+        id: 'studio',
+        name: 'Studio',
+        baseUrl: 'https://studio.example.test',
+        username: 'bob',
+      ),
+      password: 'studio-secret',
+    );
+
+    await store.selectActiveServer('home');
+    expect((await store.loadActiveServer())?.id, 'home');
+
+    await store.selectActiveServer('studio');
+
+    final active = await store.loadActiveServer();
+    expect(active?.id, 'studio');
+    expect(active?.name, 'Studio');
+    expect(await store.readPassword('home'), 'home-secret');
+    expect(await store.readPassword('studio'), 'studio-secret');
+  });
+
+  test('deletes one server and only cleans up that server data', () async {
+    final metadataFile = File(
+      '${Directory.systemTemp.createTempSync().path}/servers.json',
+    );
+    final secrets = InMemorySubsonicSecretStore();
+    final cleanup = _RecordingServerCleanup();
+    final store = SubsonicServerStore(
+      metadataStore: FileSubsonicServerMetadataStore(metadataFile),
+      secretStore: secrets,
+      cleanupHooks: [cleanup],
+    );
+
+    await store.saveServer(
+      const SubsonicServerConfig(
+        id: 'home',
+        name: 'Home',
+        baseUrl: 'https://music.example.test',
+        username: 'alice',
+      ),
+      password: 'home-secret',
+    );
+    await store.saveServer(
+      const SubsonicServerConfig(
+        id: 'studio',
+        name: 'Studio',
+        baseUrl: 'https://studio.example.test',
+        username: 'bob',
+      ),
+      password: 'studio-secret',
+    );
+    await store.selectActiveServer('studio');
+
+    await store.deleteServer('home');
+
+    final servers = await store.loadServers();
+    expect(servers.map((server) => server.id), ['studio']);
+    expect(await store.readActiveServer(), 'studio');
+    expect(await store.readPassword('home'), isNull);
+    expect(await store.readPassword('studio'), 'studio-secret');
+    expect(cleanup.deletedServerIds, ['home']);
+  });
+
   test(
     'persists metadata as JSON with normalized base URLs and no secret fields',
     () async {
@@ -131,4 +213,13 @@ void main() {
       expect(server.containsKey('salt'), isFalse);
     },
   );
+}
+
+class _RecordingServerCleanup implements SubsonicServerCleanup {
+  final List<String> deletedServerIds = <String>[];
+
+  @override
+  Future<void> deleteServerData(String serverId) async {
+    deletedServerIds.add(serverId);
+  }
 }

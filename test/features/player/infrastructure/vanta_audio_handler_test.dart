@@ -135,6 +135,60 @@ void main() {
         expect(registry.requests, [item.id]);
       },
     );
+
+    test(
+      'skips one failed remote item while preserving playable queue order',
+      () async {
+        final local = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.mp3'),
+        );
+        final failed = VantaAudioHandler.mediaItemFromTrack(
+          _track(
+            'subsonic:server-a:remote-fail',
+            'subsonic://track?serverId=server-a&id=remote-fail',
+            providerId: 'subsonic:server-a',
+          ),
+        );
+        final remote = VantaAudioHandler.mediaItemFromTrack(
+          _track(
+            'subsonic:server-a:remote-ok',
+            'subsonic://track?serverId=server-a&id=remote-ok',
+            providerId: 'subsonic:server-a',
+          ),
+        );
+        final registry = _PartiallyFailingStreamResolverRegistry(
+          resolved: {
+            'subsonic:server-a::subsonic:server-a:remote-ok': Uri.parse(
+              'https://music.example/rest/stream.view?id=remote-ok&t=fresh-token',
+            ),
+          },
+          failures: {
+            'subsonic:server-a::subsonic:server-a:remote-fail':
+                RemoteTrackResolveException.retryable(
+                  item: failed,
+                  message: 'Subsonic request timed out.',
+                ),
+          },
+        );
+
+        final result = await VantaAudioHandler.resolveQueueItemsSafely([
+          local,
+          failed,
+          remote,
+        ], registry);
+
+        expect(result.queueItems.map((item) => item.id), [local.id, remote.id]);
+        expect(result.uris, [
+          Uri.parse('file:///queue/local.mp3'),
+          Uri.parse(
+            'https://music.example/rest/stream.view?id=remote-ok&t=fresh-token',
+          ),
+        ]);
+        expect(result.failures, hasLength(1));
+        expect(result.failures.single.item.id, failed.id);
+        expect(result.failures.single.retryable, isTrue);
+      },
+    );
   });
 }
 
@@ -173,5 +227,24 @@ class _FailClosedStreamResolverRegistry implements StreamResolverRegistry {
   Future<Uri> resolve(MediaItem item) async {
     requests.add(item.id);
     throw StateError('resolver required');
+  }
+}
+
+class _PartiallyFailingStreamResolverRegistry
+    implements StreamResolverRegistry {
+  _PartiallyFailingStreamResolverRegistry({
+    required this.resolved,
+    required this.failures,
+  });
+
+  final Map<String, Uri> resolved;
+  final Map<String, Exception> failures;
+
+  @override
+  Future<Uri> resolve(MediaItem item) async {
+    final key = VantaAudioHandler.normalizeTrackKey(item)!;
+    final failure = failures[key];
+    if (failure != null) throw failure;
+    return resolved[key] ?? Uri.parse(item.id);
   }
 }

@@ -142,6 +142,51 @@ void main() {
       expect(find.text('Display Artist'), findsOneWidget);
     },
   );
+
+  testWidgets('shows retryable playback errors and exposes retry action', (
+    tester,
+  ) async {
+    final control = _FakePlayerAudioControl();
+    final controller = PlayerController(control);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mediaItemProvider.overrideWith((ref) => Stream.value(_item('a'))),
+          currentQueueProvider.overrideWith(
+            (ref) => Stream.value([_item('a')]),
+          ),
+          playbackPositionProvider.overrideWith(
+            (ref) => Stream.value(Duration.zero),
+          ),
+          playbackDurationProvider.overrideWith(
+            (ref) => Stream.value(const Duration(minutes: 3)),
+          ),
+          playbackStateProvider.overrideWith(
+            (ref) => Stream.value(
+              PlaybackState(
+                errorMessage: 'Could not play Track a. Retry this track.',
+                errorCode: 1,
+              ),
+            ),
+          ),
+          playerControllerProvider.overrideWithValue(controller),
+        ],
+        child: const MaterialApp(home: NowPlayingScreen()),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('Could not play Track a. Retry this track.'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.text('Retry track'));
+    await tester.tap(find.text('Retry track'));
+    await tester.pump();
+
+    expect(control.retryRequested, isTrue);
+  });
 }
 
 MediaItem _item(String id) => MediaItem(
@@ -174,6 +219,7 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
   String? removedMediaItemId;
   Track? playNextTrack;
   Track? addEndTrack;
+  bool retryRequested = false;
 
   @override
   Stream<MediaItem?> get mediaItem => const Stream.empty();
@@ -226,5 +272,10 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
   @override
   Future<void> addToQueueEnd(Track track) async {
     addEndTrack = track;
+  }
+
+  @override
+  Future<void> retryFailedTrack() async {
+    retryRequested = true;
   }
 }

@@ -13,6 +13,8 @@ abstract class SubsonicApiClientContract {
   Future<List<SubsonicArtist>> getArtists();
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
+    int? size,
+    int? offset,
   });
   Future<SubsonicAlbumDetail> getAlbum(String id);
   Future<SubsonicSong> getSong(String id);
@@ -27,6 +29,8 @@ class SubsonicApiClient implements SubsonicApiClientContract {
     required this.password,
     http.Client? httpClient,
     this.timeout = const Duration(seconds: 10),
+    this.maxRetryAttempts = 2,
+    this.retryBackoffBase = const Duration(milliseconds: 250),
     String Function()? saltGenerator,
   }) : _server = server.normalized(),
        _httpClient = httpClient ?? http.Client(),
@@ -36,6 +40,8 @@ class SubsonicApiClient implements SubsonicApiClientContract {
 
   final String password;
   final Duration timeout;
+  final int maxRetryAttempts;
+  final Duration retryBackoffBase;
   final SubsonicServerConfig _server;
   final http.Client _httpClient;
   final String Function() _saltGenerator;
@@ -58,9 +64,13 @@ class SubsonicApiClient implements SubsonicApiClientContract {
   @override
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
+    int? size,
+    int? offset,
   }) async {
     final response = await _request('getAlbumList2', <String, String>{
       'type': type,
+      if (size != null) 'size': '$size',
+      if (offset != null) 'offset': '$offset',
     });
     return _asList(_asMap(response['albumList2'])['album'])
         .map((album) => SubsonicAlbum.fromJson(_asMap(album)))
@@ -118,13 +128,23 @@ class SubsonicApiClient implements SubsonicApiClientContract {
     Map<String, String> params = const {},
   ]) async {
     final uri = _uri(method, params);
+    var attempt = 0;
+    while (true) {
+      attempt += 1;
+      try {
+        return await _performRequest(uri);
+      } on SubsonicFailure catch (error) {
+        if (!_shouldRetry(error) || attempt >= maxRetryAttempts) rethrow;
+        await Future<void>.delayed(_retryDelayFor(attempt));
+      }
+    }
+  }
+
+  Future<Map<String, Object?>> _performRequest(Uri uri) async {
     try {
       final response = await _httpClient.get(uri).timeout(timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw SubsonicServerFailure(
-          'Server returned HTTP ${response.statusCode}',
-          redactedUri: redactUri(uri),
-        );
+        throw _httpFailure(response.statusCode, uri);
       }
       return _decodeResponse(response.body, uri);
     } on TimeoutException catch (_) {
@@ -143,7 +163,7 @@ class SubsonicApiClient implements SubsonicApiClientContract {
         redactedUri: redactUri(uri),
       );
     } on SocketException catch (error) {
-      throw SubsonicServerFailure(
+      throw SubsonicUnavailableFailure(
         'Network error: $error',
         redactedUri: redactUri(uri),
       );
@@ -153,6 +173,37 @@ class SubsonicApiClient implements SubsonicApiClientContract {
         redactedUri: redactUri(uri),
       );
     }
+  }
+
+  bool _shouldRetry(SubsonicFailure error) {
+    return error is SubsonicTimeoutFailure ||
+        error is SubsonicUnavailableFailure;
+  }
+
+  Duration _retryDelayFor(int attempt) {
+    if (retryBackoffBase == Duration.zero) return Duration.zero;
+    final multiplier = 1 << (attempt - 1);
+    final delayMs = retryBackoffBase.inMilliseconds * multiplier;
+    const maxDelayMs = 2000;
+    return Duration(milliseconds: min(delayMs, maxDelayMs));
+  }
+
+  SubsonicFailure _httpFailure(int statusCode, Uri uri) {
+    final message = 'Server returned HTTP $statusCode';
+    final redactedUri = redactUri(uri);
+    if (statusCode == 401) {
+      return SubsonicAuthFailure(message, redactedUri: redactedUri);
+    }
+    if (statusCode == 403) {
+      return SubsonicForbiddenFailure(message, redactedUri: redactedUri);
+    }
+    if (statusCode == 404) {
+      return SubsonicNotFoundFailure(message, redactedUri: redactedUri);
+    }
+    if (statusCode >= 500) {
+      return SubsonicUnavailableFailure(message, redactedUri: redactedUri);
+    }
+    return SubsonicUnknownFailure(message, redactedUri: redactedUri);
   }
 
   Map<String, Object?> _decodeResponse(String body, Uri uri) {
@@ -172,7 +223,10 @@ class SubsonicApiClient implements SubsonicApiClientContract {
       if (code == 40 || code == 41) {
         throw SubsonicAuthFailure(message, redactedUri: redactUri(uri));
       }
-      throw SubsonicServerFailure(message, redactedUri: redactUri(uri));
+      if (code == 70) {
+        throw SubsonicNotFoundFailure(message, redactedUri: redactUri(uri));
+      }
+      throw SubsonicUnknownFailure(message, redactedUri: redactUri(uri));
     }
     if (subsonicResponse['status'] != 'ok') {
       throw const FormatException('Unknown Subsonic response status.');
@@ -330,6 +384,22 @@ class SubsonicTlsFailure extends SubsonicFailure {
 
 class SubsonicServerFailure extends SubsonicFailure {
   const SubsonicServerFailure(super.message, {super.redactedUri});
+}
+
+class SubsonicUnavailableFailure extends SubsonicServerFailure {
+  const SubsonicUnavailableFailure(super.message, {super.redactedUri});
+}
+
+class SubsonicForbiddenFailure extends SubsonicFailure {
+  const SubsonicForbiddenFailure(super.message, {super.redactedUri});
+}
+
+class SubsonicNotFoundFailure extends SubsonicFailure {
+  const SubsonicNotFoundFailure(super.message, {super.redactedUri});
+}
+
+class SubsonicUnknownFailure extends SubsonicFailure {
+  const SubsonicUnknownFailure(super.message, {super.redactedUri});
 }
 
 class SubsonicMalformedResponseFailure extends SubsonicFailure {

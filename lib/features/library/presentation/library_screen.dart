@@ -14,6 +14,7 @@ import '../application/library_providers.dart';
 import '../application/media_permission_service.dart';
 import '../application/permission_ux.dart';
 import '../../providers/infrastructure/subsonic_api_client.dart';
+import '../../providers/infrastructure/subsonic_music_provider.dart';
 import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../../library_intelligence/application/library_intelligence_providers.dart';
 import '../../library_intelligence/domain/library_snapshot.dart';
@@ -308,7 +309,7 @@ class _LibraryTab extends ConsumerWidget {
                 _LibrarySearchBar(
                   onTap: () => showSearch(
                     context: context,
-                    delegate: _TrackSearchDelegate(ref),
+                    delegate: _TrackSearchDelegate(),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -1064,12 +1065,19 @@ class _RemoteLibraryTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tracks = ref.watch(remoteLibraryTracksProvider);
+    final remoteState = ref.watch(remoteLibraryUiStateProvider);
     final sourceLabel = ref.watch(remoteLibrarySourceLabelProvider);
 
-    return tracks.when(
-      data: (items) {
+    return remoteState.when(
+      data: (state) {
+        final items = state.tracks;
         if (items.isEmpty) {
+          if (state.failure != null) {
+            return _RemoteLibraryFailureState(
+              state: state,
+              onRetry: () => _retryRemoteLibrary(ref),
+            );
+          }
           return _EmptyState(
             icon: Icons.cloud_queue_rounded,
             message:
@@ -1110,6 +1118,15 @@ class _RemoteLibraryTab extends ConsumerWidget {
                           color: VantaColors.muted,
                         ),
                       ),
+                      if (state.isPartial ||
+                          state.isUsingCache ||
+                          state.failure != null) ...[
+                        const SizedBox(height: 12),
+                        _RemoteLibraryStatusBanner(
+                          state: state,
+                          onRetry: () => _retryRemoteLibrary(ref),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1163,12 +1180,21 @@ class _RemoteLibraryTab extends ConsumerWidget {
           ),
         );
       },
-      error: (error, stack) => _EmptyState(
-        icon: Icons.cloud_off_rounded,
-        message: 'Remote library failed to load: $error',
+      error: (error, stack) => _RemoteLibraryFailureState(
+        state: RemoteLibraryUiState(
+          failure: error,
+          failureKind: RemoteLibraryFailureKind.unknown,
+          canRetry: true,
+        ),
+        onRetry: () => _retryRemoteLibrary(ref),
       ),
       loading: () => const Center(child: CircularProgressIndicator()),
     );
+  }
+
+  void _retryRemoteLibrary(WidgetRef ref) {
+    ref.invalidate(remoteLibraryUiStateProvider);
+    ref.invalidate(remoteLibraryTracksProvider);
   }
 
   void _showSubsonicConnectSheet(BuildContext context, WidgetRef ref) {
@@ -1176,6 +1202,88 @@ class _RemoteLibraryTab extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (_) => const _SubsonicConnectSheet(),
+    );
+  }
+}
+
+class _RemoteLibraryFailureState extends StatelessWidget {
+  const _RemoteLibraryFailureState({
+    required this.state,
+    required this.onRetry,
+  });
+
+  final RemoteLibraryUiState state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return _EmptyState(
+      icon: Icons.cloud_off_rounded,
+      message: _remoteFailureMessage(state),
+      ctaLabel: state.canRetry ? 'Retry' : null,
+      onCta: state.canRetry ? onRetry : null,
+    );
+  }
+}
+
+class _RemoteLibraryStatusBanner extends StatelessWidget {
+  const _RemoteLibraryStatusBanner({
+    required this.state,
+    required this.onRetry,
+  });
+
+  final RemoteLibraryUiState state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final partialMessage = state.isPartial
+        ? 'Showing a fast remote preview from up to '
+              '${SubsonicMusicProvider.defaultRemoteAlbumHydrationLimit} albums. '
+              'Use search for the full server catalog.'
+        : null;
+    final timestamp = state.lastSyncAt == null
+        ? null
+        : 'Last sync: ${_formatRemoteSyncTimestamp(state.lastSyncAt!)}';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: VantaColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: VantaColors.border, width: 0.7),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (partialMessage != null) ...[
+            Text(partialMessage, style: Theme.of(context).textTheme.bodyMedium),
+            if (state.isUsingCache || state.failure != null)
+              const SizedBox(height: 8),
+          ],
+          if (state.isUsingCache || state.failure != null)
+            Text(
+              _remoteFailureMessage(state),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          if (timestamp != null &&
+              (partialMessage != null ||
+                  state.isUsingCache ||
+                  state.failure != null)) ...[
+            const SizedBox(height: 4),
+            Text(
+              timestamp,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: VantaColors.muted),
+            ),
+          ],
+          if (state.canRetry) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -1368,6 +1476,46 @@ String _safeSubsonicError(Object error) {
   return 'Unable to connect to the server.';
 }
 
+String _remoteFailureMessage(RemoteLibraryUiState state) {
+  if (state.isUsingCache) {
+    return switch (state.failureKind) {
+      RemoteLibraryFailureKind.timeout =>
+        'Connection timed out. Showing cached music.',
+      RemoteLibraryFailureKind.tls =>
+        'Secure connection failed. Showing cached music.',
+      RemoteLibraryFailureKind.auth =>
+        'Authentication failed. Showing cached music.',
+      RemoteLibraryFailureKind.forbidden =>
+        'Access denied. Showing cached music.',
+      RemoteLibraryFailureKind.notFound =>
+        'Remote library endpoint missing. Showing cached music.',
+      RemoteLibraryFailureKind.malformed =>
+        'Server response was invalid. Showing cached music.',
+      _ => 'Server unavailable. Showing cached music.',
+    };
+  }
+
+  return switch (state.failureKind) {
+    RemoteLibraryFailureKind.timeout => 'Connection timed out.',
+    RemoteLibraryFailureKind.tls => 'Secure connection failed.',
+    RemoteLibraryFailureKind.auth => 'Authentication failed.',
+    RemoteLibraryFailureKind.forbidden => 'Access denied.',
+    RemoteLibraryFailureKind.notFound => 'Remote library endpoint missing.',
+    RemoteLibraryFailureKind.malformed => 'Server response was invalid.',
+    RemoteLibraryFailureKind.unavailable => 'Server unavailable.',
+    _ => 'Unable to load the remote library.',
+  };
+}
+
+String _formatRemoteSyncTimestamp(DateTime timestamp) {
+  final utc = timestamp.toUtc();
+  final month = utc.month.toString().padLeft(2, '0');
+  final day = utc.day.toString().padLeft(2, '0');
+  final hour = utc.hour.toString().padLeft(2, '0');
+  final minute = utc.minute.toString().padLeft(2, '0');
+  return '${utc.year}-$month-$day $hour:$minute UTC';
+}
+
 class _PlaylistsTab extends ConsumerWidget {
   const _PlaylistsTab();
 
@@ -1522,6 +1670,7 @@ class _TrackTile extends ConsumerWidget {
     required this.onAddToPlaylist,
     required this.onOpenActions,
     this.deferArtwork = false,
+    this.sourceLabel,
   });
 
   final Track track;
@@ -1531,6 +1680,7 @@ class _TrackTile extends ConsumerWidget {
   final VoidCallback onAddToPlaylist;
   final VoidCallback onOpenActions;
   final bool deferArtwork;
+  final String? sourceLabel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1541,15 +1691,15 @@ class _TrackTile extends ConsumerWidget {
       logicalSize: 56,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
     );
-    final cachedArtworkPath = deferArtwork
-        ? null
-        : ref
-              .watch(
-                trackArtworkPathProvider(
-                  TrackArtworkRequest(track: track, sizePx: querySize),
-                ),
-              )
-              .valueOrNull;
+    final artworkPath = deferArtwork
+        ? const AsyncData<String?>(null)
+        : ref.watch(
+            trackArtworkPathProvider(
+              TrackArtworkRequest(track: track, sizePx: querySize),
+            ),
+          );
+    final cachedArtworkPath = artworkPath.valueOrNull;
+    final showPlaceholderOnly = deferArtwork || artworkPath.isLoading;
 
     return Card(
       child: InkWell(
@@ -1563,7 +1713,7 @@ class _TrackTile extends ConsumerWidget {
               ArtworkTile(
                 id: track.artworkId,
                 type: ArtworkType.AUDIO,
-                showPlaceholderOnly: deferArtwork,
+                showPlaceholderOnly: showPlaceholderOnly,
                 cachedArtworkPath: cachedArtworkPath,
               ),
               const SizedBox(width: 12),
@@ -1590,6 +1740,18 @@ class _TrackTile extends ConsumerWidget {
                         context,
                       ).textTheme.bodySmall?.copyWith(color: VantaColors.muted),
                     ),
+                    if (sourceLabel != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        'Source: $sourceLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: VantaColors.muted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1832,9 +1994,7 @@ class _PlaylistCreateCard extends StatelessWidget {
 }
 
 class _TrackSearchDelegate extends SearchDelegate<void> {
-  _TrackSearchDelegate(this.ref);
-
-  final WidgetRef ref;
+  _TrackSearchDelegate();
 
   @override
   ThemeData appBarTheme(BuildContext context) => Theme.of(context);
@@ -1861,78 +2021,204 @@ class _TrackSearchDelegate extends SearchDelegate<void> {
   Widget buildSuggestions(BuildContext context) => _results(context);
 
   Widget _results(BuildContext context) {
-    final results = ref.watch(filteredTracksProvider(query));
     if (query.trim().isEmpty) {
       return const _EmptyState(
         icon: Icons.search_rounded,
         message: 'Buscá canciones por título, artista o álbum.',
       );
     }
-    if (results.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.search_off_rounded,
-        message: 'No encontré canciones con esa búsqueda.',
-      );
-    }
+    return _SearchResultsView(
+      query: query,
+      onTrackSelected: (context, ref, tracks, index) {
+        ref.read(playerControllerProvider).playTracks(tracks, index);
+        close(context, null);
+        context.push('/now-playing');
+      },
+    );
+  }
+}
 
+class _SearchResultsView extends ConsumerStatefulWidget {
+  const _SearchResultsView({
+    required this.query,
+    required this.onTrackSelected,
+  });
+
+  final String query;
+  final void Function(BuildContext, WidgetRef, List<Track>, int)
+  onTrackSelected;
+
+  @override
+  ConsumerState<_SearchResultsView> createState() => _SearchResultsViewState();
+}
+
+class _SearchResultsViewState extends ConsumerState<_SearchResultsView> {
+  @override
+  void initState() {
+    super.initState();
+    _scheduleRemoteSearch(widget.query);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SearchResultsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.query != widget.query) {
+      _scheduleRemoteSearch(widget.query);
+    }
+  }
+
+  void _scheduleRemoteSearch(String query) {
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      ref.read(remoteSearchStateProvider.notifier).setQuery(query);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final localResults = ref.watch(filteredTracksProvider(widget.query));
+    final remoteState = ref.watch(remoteSearchStateProvider);
     final favoriteTrackKeys = ref.watch(favoriteTrackKeysProvider);
-    final favoriteFlags = mapTrackFavoriteFlags(
-      tracks: results,
+    final localFavoriteFlags = mapTrackFavoriteFlags(
+      tracks: localResults,
+      favoriteTrackKeys: favoriteTrackKeys,
+    );
+    final remoteFavoriteFlags = mapTrackFavoriteFlags(
+      tracks: remoteState.tracks,
       favoriteTrackKeys: favoriteTrackKeys,
     );
 
     return _ArtworkDeferredOnScroll(
-      builder: (deferArtwork) => ListView.builder(
+      builder: (deferArtwork) => ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 104),
-        itemCount: results.length,
-        itemBuilder: (context, index) => Padding(
-          padding: EdgeInsets.only(bottom: index == results.length - 1 ? 0 : 8),
-          child: _TrackTile(
-            track: results[index],
-            deferArtwork: deferArtwork,
-            onTap: () {
-              ref.read(playerControllerProvider).playTracks(results, index);
-              close(context, null);
-              context.push('/now-playing');
-            },
-            isFavorite: favoriteFlags[index],
-            onToggleFavorite: () async {
-              await ref
-                  .read(libraryIntelligenceControllerProvider)
-                  .toggleFavoriteForTrack(results[index]);
-              ref.invalidate(libraryIntelligenceSnapshotProvider);
-            },
-            onAddToPlaylist: () => _showAddToPlaylistSheet(
-              context: context,
-              ref: ref,
-              track: results[index],
-            ),
-            onOpenActions: () => showTrackQuickActionsSheet(
-              context: context,
-              isFavorite: favoriteFlags[index],
-              onToggleFavorite: () async {
-                await ref
-                    .read(libraryIntelligenceControllerProvider)
-                    .toggleFavoriteForTrack(results[index]);
-                ref.invalidate(libraryIntelligenceSnapshotProvider);
-              },
-              onAddToPlaylist: () => _showAddToPlaylistSheet(
-                context: context,
-                ref: ref,
-                track: results[index],
+        children: [
+          const _SectionTitle(title: 'Local library'),
+          const SizedBox(height: 12),
+          if (localResults.isEmpty)
+            const _SearchStatusCard(
+              message: 'No encontré canciones locales con esa búsqueda.',
+            )
+          else
+            for (var index = 0; index < localResults.length; index += 1)
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: index == localResults.length - 1 ? 0 : 8,
+                ),
+                child: _TrackTile(
+                  track: localResults[index],
+                  deferArtwork: deferArtwork,
+                  sourceLabel: 'Local library',
+                  onTap: () =>
+                      widget.onTrackSelected(context, ref, localResults, index),
+                  isFavorite: localFavoriteFlags[index],
+                  onToggleFavorite: () async {
+                    await ref
+                        .read(libraryIntelligenceControllerProvider)
+                        .toggleFavoriteForTrack(localResults[index]);
+                    ref.invalidate(libraryIntelligenceSnapshotProvider);
+                  },
+                  onAddToPlaylist: () => showAddToPlaylistSheet(
+                    context: context,
+                    ref: ref,
+                    track: localResults[index],
+                  ),
+                  onOpenActions: () => showTrackQuickActionsSheet(
+                    context: context,
+                    isFavorite: localFavoriteFlags[index],
+                    onToggleFavorite: () async {
+                      await ref
+                          .read(libraryIntelligenceControllerProvider)
+                          .toggleFavoriteForTrack(localResults[index]);
+                      ref.invalidate(libraryIntelligenceSnapshotProvider);
+                    },
+                    onAddToPlaylist: () => showAddToPlaylistSheet(
+                      context: context,
+                      ref: ref,
+                      track: localResults[index],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
+          const SizedBox(height: 20),
+          const _SectionTitle(title: 'Remote library'),
+          const SizedBox(height: 12),
+          if (remoteState.isLoading)
+            _SearchStatusCard(
+              message: 'Searching ${remoteState.sourceLabel}...',
+            )
+          else if (remoteState.failure != null)
+            const _SearchStatusCard(
+              message: 'Remote search is unavailable right now.',
+            )
+          else if (remoteState.hasSearched && remoteState.tracks.isEmpty)
+            _SearchStatusCard(
+              message: 'No remote matches in ${remoteState.sourceLabel}.',
+            )
+          else
+            for (var index = 0; index < remoteState.tracks.length; index += 1)
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: index == remoteState.tracks.length - 1 ? 0 : 8,
+                ),
+                child: _TrackTile(
+                  track: remoteState.tracks[index],
+                  deferArtwork: deferArtwork,
+                  sourceLabel: remoteState.sourceLabel,
+                  onTap: () => widget.onTrackSelected(
+                    context,
+                    ref,
+                    remoteState.tracks,
+                    index,
+                  ),
+                  isFavorite: remoteFavoriteFlags[index],
+                  onToggleFavorite: () async {
+                    await ref
+                        .read(libraryIntelligenceControllerProvider)
+                        .toggleFavoriteForTrack(remoteState.tracks[index]);
+                    ref.invalidate(libraryIntelligenceSnapshotProvider);
+                  },
+                  onAddToPlaylist: () => showAddToPlaylistSheet(
+                    context: context,
+                    ref: ref,
+                    track: remoteState.tracks[index],
+                  ),
+                  onOpenActions: () => showTrackQuickActionsSheet(
+                    context: context,
+                    isFavorite: remoteFavoriteFlags[index],
+                    onToggleFavorite: () async {
+                      await ref
+                          .read(libraryIntelligenceControllerProvider)
+                          .toggleFavoriteForTrack(remoteState.tracks[index]);
+                      ref.invalidate(libraryIntelligenceSnapshotProvider);
+                    },
+                    onAddToPlaylist: () => showAddToPlaylistSheet(
+                      context: context,
+                      ref: ref,
+                      track: remoteState.tracks[index],
+                    ),
+                  ),
+                ),
+              ),
+        ],
       ),
     );
   }
+}
 
-  Future<void> _showAddToPlaylistSheet({
-    required BuildContext context,
-    required WidgetRef ref,
-    required Track track,
-  }) => showAddToPlaylistSheet(context: context, ref: ref, track: track);
+class _SearchStatusCard extends StatelessWidget {
+  const _SearchStatusCard({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(message, style: Theme.of(context).textTheme.bodyMedium),
+      ),
+    );
+  }
 }
 
 class _ArtworkDeferredOnScroll extends StatefulWidget {

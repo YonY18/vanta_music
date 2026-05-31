@@ -12,6 +12,10 @@ class LibraryIntelligenceReducer {
     final history = List<PlaybackHistoryEntry>.from(previous.history);
 
     for (final event in events) {
+      final identity = parseLibrarySourceIdentity(event.trackKey);
+      final providerId = identity?.providerId;
+      final trackId = identity?.trackId;
+      final serverId = identity?.serverId;
       final current =
           tracks[event.trackKey] ??
           LibraryTrackSnapshot(
@@ -23,6 +27,9 @@ class LibraryIntelligenceReducer {
             isFavorite: false,
             favoritedAt: null,
             isCompleted: false,
+            providerId: identity?.providerId,
+            trackId: identity?.trackId,
+            serverId: identity?.serverId,
           );
 
       switch (event.type) {
@@ -30,6 +37,9 @@ class LibraryIntelligenceReducer {
           tracks[event.trackKey] = current.copyWith(
             playCount: current.playCount + 1,
             lastPlayedAt: event.timestamp,
+            providerId: current.providerId ?? providerId,
+            trackId: current.trackId ?? trackId,
+            serverId: current.serverId ?? serverId,
           );
         case LibraryEventType.progressUpdated:
           final positionMs = event.positionMs ?? 0;
@@ -41,6 +51,9 @@ class LibraryIntelligenceReducer {
                 ? positionMs
                 : 0,
             isCompleted: false,
+            providerId: current.providerId ?? providerId,
+            trackId: current.trackId ?? trackId,
+            serverId: current.serverId ?? serverId,
           );
         case LibraryEventType.playbackCompleted:
           final listenedDurationMs =
@@ -51,6 +64,9 @@ class LibraryIntelligenceReducer {
             durationMs: durationMs,
             resumePositionMs: 0,
             isCompleted: true,
+            providerId: current.providerId ?? providerId,
+            trackId: current.trackId ?? trackId,
+            serverId: current.serverId ?? serverId,
           );
           history.insert(
             0,
@@ -59,6 +75,9 @@ class LibraryIntelligenceReducer {
               listenedAt: event.timestamp,
               listenedDurationMs: listenedDurationMs,
               completed: event.completed ?? true,
+              providerId: current.providerId ?? providerId,
+              trackId: current.trackId ?? trackId,
+              serverId: current.serverId ?? serverId,
             ),
           );
         case LibraryEventType.favoriteToggled:
@@ -66,6 +85,9 @@ class LibraryIntelligenceReducer {
             isFavorite: event.isFavorite ?? false,
             favoritedAt: (event.isFavorite ?? false) ? event.timestamp : null,
             lastPlayedAt: event.timestamp,
+            providerId: current.providerId ?? providerId,
+            trackId: current.trackId ?? trackId,
+            serverId: current.serverId ?? serverId,
           );
       }
     }

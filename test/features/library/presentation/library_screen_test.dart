@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:on_audio_query/on_audio_query.dart';
 import 'package:vanta_music/features/library/application/library_providers.dart';
+import 'package:vanta_music/features/library/domain/album.dart';
+import 'package:vanta_music/features/library/domain/artist.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/library/presentation/library_screen.dart';
 import 'package:vanta_music/features/library_intelligence/application/library_intelligence_providers.dart';
@@ -13,8 +17,15 @@ import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dar
 import 'package:vanta_music/features/playlists/application/playlists_controller.dart';
 import 'package:vanta_music/features/playlists/domain/playlist.dart';
 import 'package:vanta_music/features/playlists/infrastructure/local_playlist_store.dart';
+import 'package:vanta_music/features/providers/domain/music_provider.dart';
+import 'package:vanta_music/features/providers/domain/stream_uri.dart';
 import 'package:vanta_music/features/providers/infrastructure/subsonic_api_client.dart';
+import 'package:vanta_music/features/providers/infrastructure/subsonic_music_provider.dart';
 import 'package:vanta_music/features/providers/infrastructure/subsonic_server_store.dart';
+import 'package:vanta_music/shared/artwork_cache/artwork_cache_key.dart';
+import 'package:vanta_music/shared/artwork_cache/artwork_cache_providers.dart';
+import 'package:vanta_music/shared/artwork_cache/artwork_cache_resolver.dart';
+import 'package:vanta_music/shared/artwork_cache/file_artwork_cache_store.dart';
 
 void main() {
   testWidgets('renders bounded local stats cards on the home tab', (
@@ -105,6 +116,30 @@ void main() {
     expect(find.text('Display Artist • Album'), findsOneWidget);
   });
 
+  testWidgets('keeps artwork placeholder while cache path is still loading', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tracksProvider.overrideWith(
+            (ref) async => [_track('1', artworkId: 7)],
+          ),
+          artworkCacheResolverProvider.overrideWithValue(
+            _PendingArtworkResolver(),
+          ),
+        ],
+        child: const MaterialApp(home: LibraryScreen()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(Tab, 'Library'));
+    await tester.pump();
+
+    expect(find.byType(QueryArtworkWidget), findsNothing);
+  });
+
   testWidgets('keeps stats based on canonical metadata under local override', (
     tester,
   ) async {
@@ -185,6 +220,9 @@ void main() {
             subsonicServerStoreProvider.overrideWith(
               (ref) async => serverStore,
             ),
+            subsonicRemoteLibrarySnapshotStoreProvider.overrideWith(
+              (ref) async => InMemoryRemoteLibrarySnapshotStore(),
+            ),
             subsonicApiClientFactoryProvider.overrideWithValue(({
               required server,
               required password,
@@ -254,6 +292,9 @@ void main() {
         overrides: [
           tracksProvider.overrideWith((ref) async => const <Track>[]),
           subsonicServerStoreProvider.overrideWith((ref) async => serverStore),
+          subsonicRemoteLibrarySnapshotStoreProvider.overrideWith(
+            (ref) async => InMemoryRemoteLibrarySnapshotStore(),
+          ),
           subsonicApiClientFactoryProvider.overrideWithValue(({
             required server,
             required password,
@@ -300,23 +341,304 @@ void main() {
       'http://music.example.com:4533/navidrome',
     );
   });
+
+  testWidgets('shows unavailable cached remote state with stale timestamp', (
+    tester,
+  ) async {
+    final server = const SubsonicServerConfig(
+      id: 'server-a',
+      name: 'Navidrome',
+      baseUrl: 'https://music.example.test',
+      username: 'alice',
+    );
+    final provider = SubsonicMusicProvider(
+      server: server,
+      client: _ControlledSubsonicApiClient(
+        initialError: const SubsonicUnavailableFailure('Server unavailable.'),
+      ),
+      snapshotStore: InMemoryRemoteLibrarySnapshotStore(
+        snapshots: [
+          RemoteLibrarySnapshot(
+            serverId: 'server-a',
+            providerId: 'subsonic:server-a',
+            tracks: [
+              _track(
+                'remote-1',
+                title: 'Cached Remote',
+                providerId: 'subsonic:server-a',
+                uri: Uri.parse(
+                  'subsonic://track?serverId=server-a&id=remote-1',
+                ),
+              ),
+            ],
+            lastSyncAt: DateTime.utc(2026, 5, 29, 18, 30),
+            isStale: false,
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpLibraryScreen(remoteProvider: provider);
+
+    await tester.tap(find.widgetWithText(Tab, 'Remote'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cached Remote'), findsOneWidget);
+    expect(
+      find.text('Server unavailable. Showing cached music.'),
+      findsOneWidget,
+    );
+    expect(find.text('Last sync: 2026-05-29 18:30 UTC'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+  });
+
+  testWidgets('shows bounded remote preview messaging for large servers', (
+    tester,
+  ) async {
+    final provider = SubsonicMusicProvider(
+      server: const SubsonicServerConfig(
+        id: 'server-a',
+        name: 'Navidrome',
+        baseUrl: 'https://music.example.test',
+        username: 'alice',
+      ),
+      client: _ControlledSubsonicApiClient(
+        albums: const [
+          SubsonicAlbum(id: 'album-1', title: 'One', artist: 'A'),
+          SubsonicAlbum(id: 'album-2', title: 'Two', artist: 'A'),
+        ],
+        songsByAlbum: const {
+          'album-1': [
+            SubsonicSong(id: 'song-1', title: 'One', artist: 'A', album: 'One'),
+          ],
+          'album-2': [
+            SubsonicSong(id: 'song-2', title: 'Two', artist: 'A', album: 'Two'),
+          ],
+        },
+      ),
+      remoteAlbumHydrationLimit: 2,
+    );
+
+    await tester.pumpLibraryScreen(remoteProvider: provider);
+
+    await tester.tap(find.widgetWithText(Tab, 'Remote'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Showing a fast remote preview'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Use search for the full server catalog.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'failed connection test does not save or switch the active server',
+    (tester) async {
+      final metadataStore = _MemorySubsonicMetadataStore();
+      final secretStore = InMemorySubsonicSecretStore();
+      final serverStore = SubsonicServerStore(
+        metadataStore: metadataStore,
+        secretStore: secretStore,
+      );
+      final client = _ControlledSubsonicApiClient(
+        initialError: const SubsonicUnavailableFailure('Server unavailable.'),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tracksProvider.overrideWith((ref) async => const <Track>[]),
+            subsonicServerStoreProvider.overrideWith(
+              (ref) async => serverStore,
+            ),
+            subsonicRemoteLibrarySnapshotStoreProvider.overrideWith(
+              (ref) async => InMemoryRemoteLibrarySnapshotStore(),
+            ),
+            subsonicApiClientFactoryProvider.overrideWithValue(({
+              required server,
+              required password,
+            }) {
+              client.server = server;
+              client.password = password;
+              return client;
+            }),
+            libraryIntelligenceSnapshotProvider.overrideWith(
+              (ref) async => const LibrarySnapshot.empty(),
+            ),
+            localPlaylistStoreProvider.overrideWithValue(
+              _MemoryPlaylistStore(),
+            ),
+          ],
+          child: const MaterialApp(home: LibraryScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(Tab, 'Remote'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect to Subsonic'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'Office');
+      await tester.enterText(fields.at(1), 'https://office.example.com');
+      await tester.enterText(fields.at(2), 'bob');
+      await tester.enterText(fields.at(3), 'bad-secret');
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Connect to Subsonic').last,
+      );
+      await tester.pumpAndSettle();
+
+      final state = await metadataStore.read();
+      expect(state.activeServerId, isNull);
+      expect(state.servers, isEmpty);
+      expect(find.textContaining('Connection failed:'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'manual retry reloads remote library after an unavailable error',
+    (tester) async {
+      final provider = _FlakyRemoteMusicProvider(
+        firstError: const SubsonicUnavailableFailure('Server unavailable.'),
+        recoveredTracks: [
+          _track(
+            'remote-1',
+            title: 'Recovered Remote',
+            providerId: 'subsonic:server-a',
+            uri: Uri.parse('subsonic://track?serverId=server-a&id=remote-1'),
+          ),
+        ],
+      );
+
+      await tester.pumpLibraryScreen(remoteProvider: provider);
+
+      await tester.tap(find.widgetWithText(Tab, 'Remote'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Server unavailable.'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recovered Remote'), findsOneWidget);
+      expect(provider.attempts, 2);
+    },
+  );
+
+  testWidgets('search shows debounced remote loading and source labels', (
+    tester,
+  ) async {
+    final remoteSearch = _ControlledRemoteSearch();
+
+    await tester.pumpLibraryScreen(
+      tracks: [_track('1', title: 'Local Hit')],
+      remoteSearch: remoteSearch,
+      remoteSearchDebounce: const Duration(milliseconds: 20),
+    );
+
+    await tester.tap(find.widgetWithText(Tab, 'Library'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Search artists, albums, tracks'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'hit');
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Local library'), findsOneWidget);
+    expect(find.text('Remote library'), findsOneWidget);
+    expect(find.text('Searching Navidrome...'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 25));
+    remoteSearch.complete('hit', [
+      _track(
+        'remote-1',
+        title: 'Remote Hit',
+        providerId: 'subsonic:server-a',
+        uri: Uri.parse('subsonic://track?serverId=server-a&id=remote-1'),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Local Hit'), findsOneWidget);
+    expect(find.text('Remote Hit'), findsOneWidget);
+    expect(find.text('Source: Local library'), findsOneWidget);
+    expect(find.text('Source: Navidrome'), findsOneWidget);
+  });
+
+  testWidgets('search shows explicit remote empty and error states', (
+    tester,
+  ) async {
+    final remoteSearch = _ControlledRemoteSearch();
+
+    await tester.pumpLibraryScreen(
+      tracks: [_track('1', title: 'Local Hit')],
+      remoteSearch: remoteSearch,
+      remoteSearchDebounce: Duration.zero,
+    );
+
+    await tester.tap(find.widgetWithText(Tab, 'Library'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Search artists, albums, tracks'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'missing');
+    await tester.pump();
+    await tester.pump();
+    remoteSearch.complete('missing', const []);
+    await tester.pumpAndSettle();
+
+    expect(find.text('No remote matches in Navidrome.'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'broken');
+    await tester.pump();
+    await tester.pump();
+    remoteSearch.fail(
+      'broken',
+      const SubsonicUnavailableFailure('Server unavailable.'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Remote search is unavailable right now.'),
+      findsOneWidget,
+    );
+  });
 }
 
 extension on WidgetTester {
   Future<void> pumpLibraryScreen({
     List<Track> tracks = const [],
     List<Track> remoteTracks = const [],
+    MusicProvider? remoteProvider,
     LibrarySnapshot snapshot = const LibrarySnapshot.empty(),
     List<Playlist> playlists = const [],
     MetadataOverrideStore? overrideStore,
+    _ControlledRemoteSearch? remoteSearch,
+    Duration? remoteSearchDebounce,
     bool settle = true,
   }) async {
     await pumpWidget(
       ProviderScope(
         overrides: [
           tracksProvider.overrideWith((ref) async => tracks),
-          remoteLibraryTracksProvider.overrideWith((ref) async => remoteTracks),
+          if (remoteProvider == null)
+            remoteLibraryTracksProvider.overrideWith(
+              (ref) async => remoteTracks,
+            ),
           remoteLibrarySourceLabelProvider.overrideWithValue('Navidrome'),
+          if (remoteProvider != null)
+            activeRemoteMusicProvider.overrideWithValue(remoteProvider),
+          if (remoteProvider == null && remoteTracks.isNotEmpty)
+            activeRemoteMusicProvider.overrideWithValue(
+              _FlakyRemoteMusicProvider(
+                firstError: StateError('unused'),
+                recoveredTracks: remoteTracks,
+                failFirstAttempt: false,
+              ),
+            ),
           libraryIntelligenceSnapshotProvider.overrideWith(
             (ref) async => snapshot,
           ),
@@ -325,6 +647,12 @@ extension on WidgetTester {
           ),
           if (overrideStore != null)
             metadataOverrideStoreProvider.overrideWithValue(overrideStore),
+          if (remoteSearch != null)
+            remoteTrackSearchProvider.overrideWithValue(remoteSearch.search),
+          if (remoteSearchDebounce != null)
+            remoteSearchDebounceDurationProvider.overrideWithValue(
+              remoteSearchDebounce,
+            ),
         ],
         child: const MaterialApp(home: LibraryScreen()),
       ),
@@ -337,6 +665,69 @@ extension on WidgetTester {
   }
 }
 
+class _ControlledRemoteSearch {
+  final Map<String, Completer<List<Track>>> _queries =
+      <String, Completer<List<Track>>>{};
+
+  Future<List<Track>> search(String query) {
+    return _ensureCompleter(query).future;
+  }
+
+  void complete(String query, List<Track> tracks) {
+    _ensureCompleter(query).complete(tracks);
+  }
+
+  void fail(String query, Object error) {
+    _ensureCompleter(query).completeError(error);
+  }
+
+  Completer<List<Track>> _ensureCompleter(String query) {
+    return _queries.putIfAbsent(query, () {
+      final completer = Completer<List<Track>>();
+      completer.future.catchError((_) => const <Track>[]);
+      return completer;
+    });
+  }
+}
+
+class _FlakyRemoteMusicProvider implements MusicProvider {
+  _FlakyRemoteMusicProvider({
+    required this.firstError,
+    required this.recoveredTracks,
+    this.failFirstAttempt = true,
+  });
+
+  final Object firstError;
+  final List<Track> recoveredTracks;
+  final bool failFirstAttempt;
+  int attempts = 0;
+
+  @override
+  String get id => 'subsonic:server-a';
+
+  @override
+  String get name => 'Navidrome';
+
+  @override
+  Future<List<Album>> getAlbums() async => const [];
+
+  @override
+  Future<List<Artist>> getArtists() async => const [];
+
+  @override
+  Future<StreamUri> resolveStream(Track track) async => StreamUri(track.uri);
+
+  @override
+  Future<List<Track>> search(String query) async => recoveredTracks;
+
+  @override
+  Future<List<Track>> getTracks() async {
+    attempts += 1;
+    if (failFirstAttempt && attempts == 1) throw firstError;
+    return recoveredTracks;
+  }
+}
+
 Track _track(
   String id, {
   String? title,
@@ -345,6 +736,7 @@ Track _track(
   int durationSeconds = 120,
   String providerId = 'local',
   Uri? uri,
+  int? artworkId,
 }) {
   return Track(
     id: id,
@@ -353,8 +745,51 @@ Track _track(
     artist: artist,
     album: album,
     uri: uri ?? Uri.parse('content://song/$id'),
+    artworkId: artworkId,
     duration: Duration(seconds: durationSeconds),
   );
+}
+
+class _PendingArtworkResolver extends ArtworkCacheResolver {
+  _PendingArtworkResolver()
+    : super(
+        store: _NoopArtworkCacheStore(),
+        source: _NoopArtworkBytesSource(),
+        embeddedSource: _NoopEmbeddedArtworkBytesSource(),
+      );
+
+  @override
+  Future<String?> resolvePath({required Track track, required int sizePx}) {
+    return Completer<String?>().future;
+  }
+}
+
+class _NoopArtworkCacheStore implements ArtworkCacheStore {
+  @override
+  int get maxCacheSizeBytes => 1024;
+
+  @override
+  Future<void> deleteServer(String serverId) async {}
+
+  @override
+  Future<String?> readPath(ArtworkCacheKey key) async => null;
+
+  @override
+  Future<void> writeBytes(ArtworkCacheKey key, Uint8List bytes) async {}
+}
+
+class _NoopArtworkBytesSource implements ArtworkBytesSource {
+  @override
+  Future<Uint8List?> fetch({required int artworkId, required int sizePx}) async {
+    return null;
+  }
+}
+
+class _NoopEmbeddedArtworkBytesSource implements EmbeddedArtworkBytesSource {
+  @override
+  Future<Uint8List?> fetch({required Uri uri, required int sizePx}) async {
+    return null;
+  }
 }
 
 LibraryTrackSnapshot _snapshot(String trackKey, {required int playCount}) {
@@ -431,7 +866,16 @@ class _MemorySubsonicMetadataStore implements SubsonicServerMetadataStore {
 }
 
 class _ControlledSubsonicApiClient implements SubsonicApiClientContract {
+  _ControlledSubsonicApiClient({
+    this.initialError,
+    this.albums = const [],
+    this.songsByAlbum = const {},
+  });
+
   final Completer<void> _pingCompleter = Completer<void>();
+  final Object? initialError;
+  final List<SubsonicAlbum> albums;
+  final Map<String, List<SubsonicSong>> songsByAlbum;
 
   SubsonicServerConfig? server;
   String? password;
@@ -442,6 +886,7 @@ class _ControlledSubsonicApiClient implements SubsonicApiClientContract {
   @override
   Future<void> ping() {
     pingCalled = true;
+    if (initialError != null) return Future<void>.error(initialError!);
     return _pingCompleter.future;
   }
 
@@ -451,11 +896,21 @@ class _ControlledSubsonicApiClient implements SubsonicApiClientContract {
   @override
   Future<List<SubsonicAlbum>> getAlbumList2({
     String type = 'alphabeticalByName',
-  }) async => const [];
+    int? size,
+    int? offset,
+  }) async {
+    if (initialError != null) throw initialError!;
+    final start = offset ?? 0;
+    final bounded = albums.skip(start);
+    if (size == null) return bounded.toList(growable: false);
+    return bounded.take(size).toList(growable: false);
+  }
 
   @override
-  Future<SubsonicAlbumDetail> getAlbum(String id) async =>
-      throw UnimplementedError();
+  Future<SubsonicAlbumDetail> getAlbum(String id) async => SubsonicAlbumDetail(
+    album: albums.firstWhere((album) => album.id == id),
+    songs: songsByAlbum[id] ?? const <SubsonicSong>[],
+  );
 
   @override
   Future<SubsonicSong> getSong(String id) async => throw UnimplementedError();
