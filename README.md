@@ -7,7 +7,7 @@
 
 ### A modern, minimal and performance-first music player.
 
-Vanta Music is a premium music player built with Flutter, focused on local/offline music, fluid UX, clean architecture and future self-hosted music streaming support.
+Vanta Music is an Android-first Flutter music player focused on local/offline playback, background audio, rich library browsing, and Subsonic/Navidrome-compatible streaming.
 
 <br />
 
@@ -23,11 +23,15 @@ Vanta Music is a premium music player built with Flutter, focused on local/offli
 
 ## Overview
 
-**Vanta Music** is an Android-first music player designed for people who care about performance, visual polish and a refined offline listening experience.
+**Vanta Music** is a dark, minimal music player built for daily Android listening. It combines local library playback with a self-hosted remote path through the Subsonic API, while keeping the architecture feature-based and easy to extend.
 
-The project aims to combine the simplicity of a local music player with the power of future self-hosted integrations such as **Navidrome** and **Jellyfin**.
+The current app is centered on:
 
-The visual direction is dark, minimal and premium, inspired by the clean system aesthetic of **Nothing OS**.
+- Local music from Android MediaStore and manually selected folders.
+- Background playback with notification, lockscreen, and media controls.
+- A library-first UI with tracks, albums, artists, search, playlists, favorites, recents, and listening stats.
+- Cached artwork for smooth library and player surfaces.
+- Early Subsonic/Navidrome-compatible browsing, search, and playback.
 
 ---
 
@@ -47,50 +51,60 @@ The visual direction is dark, minimal and premium, inspired by the clean system 
 
 ## Current beta scope
 
-Vanta Music is being prepared for an internal Android beta focused on daily local playback.
+Vanta Music is being prepared for an internal Android beta focused on daily local playback plus a first self-hosted streaming slice.
 
 ### Included now
 
-- Local music playback from MediaStore and manually selected folders.
-- FLAC and MP3 playback.
-- Background playback with notification, lockscreen, and media controls.
-- Persistent queue/session restore.
-- Local playlists, favorites, recently played, and listening stats.
-- Cached artwork for lists and player surfaces.
-- Dark, minimal, portrait-first UI.
+- Local music playback from MediaStore and selected folders.
+- MP3, FLAC, OGG, and M4A local library support.
+- Background playback through `audio_service` and `just_audio`.
+- Notification, lockscreen, and media button controls.
+- Persistent playback queue/session restore.
+- Tracks, albums, artists, search, favorites, recents, most played, continue listening, and library stats.
+- Local playlists with persisted playlist data.
+- Mini player, full now-playing screen, queue view, play next, add to queue, and remove from queue.
+- Cached local and remote artwork, including embedded/folder artwork extraction for local files.
+- Subsonic/Navidrome-compatible remote connection, browse preview, search, playback, and cached snapshot fallback.
+- Dark, minimal, portrait-first Android UI.
 
 ### Not in this beta
 
-- Navidrome, Jellyfin, and YouTube Music integrations.
-- Metadata editing.
+- Jellyfin integration.
+- YouTube Music integration.
 - Cloud sync.
 - Desktop/iOS support.
+- Full metadata editing UI.
+- Full remote catalog sync/offline cache.
 
 ---
 
 ## Features
 
-### Current focus
+### Implemented
 
 - 🎵 Local/offline music playback
-- ⚡ Fast and responsive user experience
-- 🌑 Dark, minimal and premium interface
 - 🎧 Background audio playback
-- 🧱 Clean and scalable architecture
-- 🗄️ Local persistence with SQLite
-- 📱 Android-first experience
-- 🖼️ Cached artwork for local tracks
-- 🎼 FLAC support
+- 📱 Android-first, portrait-first experience
+- 🔎 Local library search
+- 💿 Track, album, and artist browsing
+- 🧾 Local playlists
+- ⭐ Favorites and listening history
+- 📊 Recents, most played, continue listening, and stats
+- 🧺 Queue management
+- 🖼️ Cached artwork for library and player surfaces
+- 🎼 MP3, FLAC, OGG, and M4A support
+- ☁️ Subsonic/Navidrome-compatible remote playback slice
+- 🌑 Dark, minimal and premium interface
+- 🧱 Feature-based architecture
 
-### Planned features
+### Planned or partial
 
-- 🔍 Advanced music library indexing
-- 🧠 Smart playlists
-- 🧾 Metadata reading and editing
-- 🖼️ Album artwork management
-- 🔄 Sync support
-- ☁️ Navidrome integration
 - 🪼 Jellyfin integration
+- ▶️ YouTube Music integration
+- 🧾 Metadata editing UI
+- 🔄 Cloud/library sync
+- 📦 Offline cache strategy for remote libraries
+- 🧠 AI-assisted library tools
 - 🖥️ Linux and Windows desktop support
 - 🍎 iOS support
 
@@ -102,12 +116,18 @@ Vanta Music is being prepared for an internal Android beta focused on daily loca
 |---|---|
 | Framework | Flutter |
 | Language | Dart |
+| Routing | go_router |
+| State management | Riverpod |
 | Audio playback | just_audio |
 | Background audio | audio_service |
-| State management | Riverpod |
-| Local database | Drift / SQLite |
+| Android library access | on_audio_query |
+| Folder selection | file_picker |
+| Permissions | permission_handler |
+| Remote API | http, Subsonic-compatible API client |
+| Secure credentials | flutter_secure_storage |
+| Local persistence | JSON/file stores under app support storage |
+| Artwork and metadata | palette_generator, local/remote artwork cache, metadata override plumbing |
 | Primary platform | Android |
-| Future platforms | Linux, Windows, iOS |
 
 ---
 
@@ -181,12 +201,6 @@ Run on Android:
 flutter run
 ```
 
-Run code generation if needed:
-
-```bash
-dart run build_runner build --delete-conflicting-outputs
-```
-
 Run tests:
 
 ```bash
@@ -207,27 +221,6 @@ Beta APKs are available from the repository **Releases** page.
 
 Open the latest Vanta Music beta prerelease, then download the APK from **Assets**.
 
----
-
-## Project Structure
-
-```text
-lib/
-├── app/                  # App shell, router, theme
-├── features/
-│   ├── library/          # Local library, permissions, folders, screens
-│   ├── library_intelligence/ # Favorites, recents, play stats
-│   ├── player/           # audio_service, just_audio, player UI, session
-│   ├── playlists/        # Local playlists
-│   └── providers/        # Local and future provider abstractions
-├── shared/               # Artwork cache, widgets, utilities
-└── main.dart             # App entry point
-```
-
----
-
-## Internal beta checklist
-
 Before sharing a build, run through [`docs/internal-beta-checklist.md`](docs/internal-beta-checklist.md).
 
 Quick gate:
@@ -237,55 +230,86 @@ Quick gate:
 - [ ] Long background playback test
 - [ ] Notification/lockscreen controls test
 - [ ] Large-library scroll test
+- [ ] Subsonic/Navidrome smoke test, when remote playback is part of the build
 - [ ] No secrets or local files tracked by Git
+
+---
+
+## Project Structure
+
+```text
+lib/
+├── app/                       # App shell, router, theme
+├── features/
+│   ├── library/               # Local library, permissions, folders, search, screens
+│   ├── library_intelligence/  # Favorites, recents, play stats, listening history
+│   ├── player/                # audio_service, just_audio, player UI, queue/session
+│   ├── playlists/             # Local playlists and persistence
+│   ├── premium_metadata/      # Metadata override and palette cache plumbing
+│   ├── providers/             # Local, Subsonic, and placeholder provider integrations
+│   └── search/                # Search feature placeholder
+├── shared/                    # Artwork cache, widgets, utilities
+└── main.dart                  # App entry point
+```
+
+---
+
+## Remote music support
+
+Vanta Music already includes an early Subsonic-compatible provider path. It is intended to support servers such as Navidrome through the Subsonic API.
+
+| Service | Status |
+|---|---|
+| Local device library | Implemented |
+| Selected local folders | Implemented |
+| Subsonic-compatible servers | Early implementation |
+| Navidrome | Early implementation through Subsonic API |
+| Jellyfin | Placeholder |
+| YouTube Music | Placeholder |
+| Cloud sync | Planned |
+| Remote offline cache | Planned |
+
+The remote tab currently favors connection, preview browsing, search, playback, retry/error handling, and cached snapshot fallback. Full remote catalog sync is still planned.
+
+Manual remote testing notes live in [`docs/manual/navidrome-subsonic-test.md`](docs/manual/navidrome-subsonic-test.md).
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Foundation
+### Done or active
 
-- [ ] Project architecture
-- [ ] Local database setup
-- [ ] Audio playback foundation
-- [ ] Background audio service
-- [ ] Initial dark UI system
+- [x] Feature-based project architecture
+- [x] Local Android library access
+- [x] Selected folder scanning
+- [x] Audio playback foundation
+- [x] Background audio service
+- [x] Dark UI system
+- [x] Library tabs for tracks, albums, and artists
+- [x] Full player screen
+- [x] Mini player
+- [x] Queue management
+- [x] Search
+- [x] Local playlists
+- [x] Favorites, recents, most played, continue listening, and stats
+- [x] Artwork cache
+- [x] Subsonic/Navidrome-compatible remote playback slice
 
-### Phase 2 — Local Music Experience
+### Next
 
-- [ ] Scan local music files
-- [ ] Build music library
-- [ ] Album, artist and track views
-- [ ] Full player screen
-- [ ] Queue management
-
-### Phase 3 — Premium UX
-
-- [ ] Smooth transitions
-- [ ] Mini player
-- [ ] Search
-- [ ] Playlist support
-- [ ] Metadata improvements
-
-### Phase 4 — Sync & Self-hosted
-
-- [ ] Navidrome support
-- [ ] Jellyfin support
-- [ ] Account/session layer
-- [ ] Library sync
-- [ ] Offline caching strategy
-
-### Phase 5 — Multi-platform
-
-- [ ] Linux support
-- [ ] Windows support
-- [ ] iOS support
+- [ ] Stabilize internal Android beta builds
+- [ ] Improve playlist management UI
+- [ ] Expand metadata editing into user-facing flows
+- [ ] Harden remote library browsing and sync behavior
+- [ ] Add remote offline cache strategy
+- [ ] Add Jellyfin provider implementation
+- [ ] Evaluate desktop and iOS support after Android beta stability
 
 ---
 
 ## Current Status
 
-Vanta Music is in **internal beta preparation**. The current goal is daily-use stability before large new features.
+Vanta Music is in **internal beta preparation**. The current goal is daily-use stability for local playback, while the Subsonic/Navidrome-compatible remote path continues to mature.
 
 ---
 
@@ -300,20 +324,6 @@ Vanta Music takes inspiration from:
 - Smooth, focused mobile experiences
 
 The goal is not to copy an existing product, but to build a music player with its own identity: quiet, dark, elegant and fast.
-
----
-
-## Future Self-hosted Support
-
-Vanta Music is planned to support self-hosted music ecosystems:
-
-| Service | Status |
-|---|---|
-| Navidrome | Planned |
-| Jellyfin | Planned |
-| Sync | Planned |
-| Offline cache | Planned |
-| Desktop clients | Planned |
 
 ---
 
