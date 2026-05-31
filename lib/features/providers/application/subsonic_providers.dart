@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../downloads/infrastructure/download_database.dart';
+import '../../downloads/infrastructure/file_download_storage.dart';
 import '../infrastructure/subsonic_api_client.dart';
 import '../infrastructure/subsonic_music_provider.dart';
 import '../infrastructure/subsonic_server_store.dart';
@@ -38,6 +40,8 @@ final subsonicRemoteLibrarySnapshotStoreProvider =
 Future<SubsonicServerStore> buildSubsonicServerStore({
   required Directory directory,
   SubsonicSecretStore secretStore = const FlutterSecureSubsonicSecretStore(),
+  DownloadDatabase? downloadDatabase,
+  FileDownloadStorage? downloadStorage,
 }) async {
   final snapshotStore = FileRemoteLibrarySnapshotStore(
     File('${directory.path}/subsonic_remote_library_cache.json'),
@@ -45,6 +49,12 @@ Future<SubsonicServerStore> buildSubsonicServerStore({
   final artworkStore = FileArtworkCacheStore(
     appSupportDirectory: () async => directory,
   );
+  final offlineDownloadDatabase =
+      downloadDatabase ??
+      DownloadDatabase.sharedFile(File('${directory.path}/downloads.sqlite'));
+  final offlineDownloadStorage =
+      downloadStorage ??
+      FileDownloadStorage(appSupportDirectory: () async => directory);
   return SubsonicServerStore(
     metadataStore: FileSubsonicServerMetadataStore(
       File('${directory.path}/subsonic_servers.json'),
@@ -53,6 +63,10 @@ Future<SubsonicServerStore> buildSubsonicServerStore({
     cleanupHooks: [
       RemoteLibrarySnapshotServerCleanup(snapshotStore),
       RemoteArtworkCacheServerCleanup(artworkStore),
+      OfflineDownloadServerCleanup(
+        downloadDatabase: offlineDownloadDatabase,
+        downloadStorage: offlineDownloadStorage,
+      ),
     ],
   );
 }
@@ -76,5 +90,30 @@ class RemoteArtworkCacheServerCleanup implements SubsonicServerCleanup {
   @override
   Future<void> deleteServerData(String serverId) {
     return artworkStore.deleteServer(serverId);
+  }
+}
+
+class OfflineDownloadServerCleanup implements SubsonicServerCleanup {
+  const OfflineDownloadServerCleanup({
+    required this.downloadDatabase,
+    required this.downloadStorage,
+  });
+
+  final DownloadDatabase downloadDatabase;
+  final FileDownloadStorage downloadStorage;
+
+  @override
+  Future<void> deleteServerData(String serverId) async {
+    final downloads = await downloadDatabase.findByServer(
+      serverId,
+      providerFamily: 'subsonic',
+    );
+    for (final item in downloads) {
+      await downloadStorage.deleteArtifacts(
+        finalRelativePath: item.localRelativePath,
+        tempRelativePath: item.tempRelativePath,
+      );
+      await downloadDatabase.deleteDownload(item.downloadKey);
+    }
   }
 }

@@ -4,6 +4,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../downloads/infrastructure/download_database.dart';
+import '../../downloads/infrastructure/file_download_storage.dart';
 import '../../library_intelligence/application/library_intelligence_reducer.dart';
 import '../../library_intelligence/application/library_intelligence_refresh.dart';
 import '../../library_intelligence/application/library_intelligence_sink.dart';
@@ -33,6 +35,12 @@ Future<VantaAudioHandler> initAudioHandler() async {
     ),
     secretStore: const FlutterSecureSubsonicSecretStore(),
   );
+  final downloadDatabase = DownloadDatabase.sharedFile(
+    File('${directory.path}/downloads.sqlite'),
+  );
+  final downloadStorage = FileDownloadStorage(
+    appSupportDirectory: () async => directory,
+  );
 
   final handler = await AudioService.init(
     builder: () => VantaAudioHandler(
@@ -42,6 +50,8 @@ Future<VantaAudioHandler> initAudioHandler() async {
         store: subsonicStore,
         clientFactory: ({required server, required password}) =>
             SubsonicApiClient(server: server, password: password),
+        downloadDatabase: downloadDatabase,
+        downloadStorage: downloadStorage,
       ),
     ),
     config: const AudioServiceConfig(

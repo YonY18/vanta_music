@@ -1,5 +1,10 @@
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vanta_music/features/downloads/domain/download_item.dart';
+import 'package:vanta_music/features/downloads/infrastructure/download_database.dart';
+import 'package:vanta_music/features/downloads/infrastructure/file_download_storage.dart';
 import 'package:vanta_music/features/player/application/subsonic_stream_resolver_registry.dart';
 import 'package:vanta_music/features/player/infrastructure/vanta_audio_handler.dart';
 import 'package:vanta_music/features/providers/infrastructure/subsonic_api_client.dart';
@@ -52,6 +57,129 @@ void main() {
     expect(result.path, '/rest/stream.view');
     expect(result.queryParameters['t'], 'fresh-token');
     expect(factoryPassword, 'secret-password');
+  });
+
+  test('prefers a validated downloaded file before remote streaming', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'resolver-local-first',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
+    final database = DownloadDatabase.inMemory();
+    addTearDown(database.close);
+    final locations = await storage.resolvePaths(
+      _identity(),
+      fileExtension: 'mp3',
+    );
+    await locations.finalFile.parent.create(recursive: true);
+    await locations.finalFile.writeAsBytes([1, 2, 3]);
+    await database.putDownload(
+      _completedDownload(
+        localRelativePath: locations.finalRelativePath,
+        tempRelativePath: locations.tempRelativePath,
+        sizeBytes: 3,
+      ),
+    );
+
+    final resolver = SubsonicStreamResolverRegistry(
+      store: await _storeWithServer(),
+      clientFactory: ({required server, required password}) {
+        fail('remote resolver should not be used when download is valid');
+      },
+      downloadDatabase: database,
+      downloadStorage: storage,
+    );
+    final item = _canonicalItem();
+
+    final result = await resolver.resolve(item);
+
+    expect(result, locations.finalFile.uri);
+    expect(item.id, 'subsonic://track?serverId=https-music-example-com-alice&id=song-1');
+    expect(item.extras?['canonicalUri'], item.id);
+    expect(item.extras?['trackId'], 'subsonic:https-music-example-com-alice:song-1');
+  });
+
+  test('falls back to remote streaming when completed file is missing', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'resolver-missing-file',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
+    final database = DownloadDatabase.inMemory();
+    addTearDown(database.close);
+    final locations = await storage.resolvePaths(
+      _identity(),
+      fileExtension: 'mp3',
+    );
+    await database.putDownload(
+      _completedDownload(
+        localRelativePath: locations.finalRelativePath,
+        tempRelativePath: locations.tempRelativePath,
+        sizeBytes: 42,
+      ),
+    );
+    final resolver = SubsonicStreamResolverRegistry(
+      store: await _storeWithServer(),
+      clientFactory: ({required server, required password}) => _FakeSubsonicClient(
+        stream: Uri.parse(
+          'https://music.example.com/rest/stream.view?id=song-1&u=alice&t=fresh-token',
+        ),
+      ),
+      downloadDatabase: database,
+      downloadStorage: storage,
+    );
+
+    final result = await resolver.resolve(_canonicalItem());
+    final updated = await database.getDownload(_identity().downloadKey);
+
+    expect(result.scheme, 'https');
+    expect(updated?.status, DownloadStatus.failed);
+    expect(updated?.errorCode, 'offline-file-missing');
+    expect(updated?.lastValidatedAt, isNotNull);
+  });
+
+  test('fails with offline-unavailable when local file is invalid and remote is down', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'resolver-invalid-file',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
+    final database = DownloadDatabase.inMemory();
+    addTearDown(database.close);
+    final locations = await storage.resolvePaths(
+      _identity(),
+      fileExtension: 'mp3',
+    );
+    await locations.finalFile.parent.create(recursive: true);
+    await locations.finalFile.writeAsBytes(const []);
+    await database.putDownload(
+      _completedDownload(
+        localRelativePath: locations.finalRelativePath,
+        tempRelativePath: locations.tempRelativePath,
+        sizeBytes: 0,
+      ),
+    );
+    final resolver = SubsonicStreamResolverRegistry(
+      store: await _storeWithServer(),
+      clientFactory: ({required server, required password}) => _ThrowingSubsonicClient(
+        error: const SubsonicUnavailableFailure('Server unavailable.'),
+      ),
+      downloadDatabase: database,
+      downloadStorage: storage,
+    );
+
+    await expectLater(
+      () => resolver.resolve(_canonicalItem()),
+      throwsA(
+        isA<RemoteTrackResolveException>()
+            .having((error) => error.retryable, 'retryable', isTrue)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('Offline copy is unavailable.'),
+            ),
+      ),
+    );
   });
 
   test('preserves direct local media item URIs', () async {
@@ -268,6 +396,54 @@ void main() {
         ),
       );
     },
+  );
+}
+
+DownloadIdentity _identity() {
+  return const DownloadIdentity(
+    providerFamily: 'subsonic',
+    providerId: 'subsonic:https-music-example-com-alice',
+    serverId: 'https-music-example-com-alice',
+    trackId: 'song-1',
+    remoteItemId: 'subsonic:https-music-example-com-alice:song-1',
+    canonicalUri:
+        'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+  );
+}
+
+MediaItem _canonicalItem() {
+  return const MediaItem(
+    id: 'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+    title: 'Remote Song',
+    extras: {
+      'providerId': 'subsonic:https-music-example-com-alice',
+      'canonicalUri':
+          'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+      'trackId': 'subsonic:https-music-example-com-alice:song-1',
+    },
+  );
+}
+
+DownloadItem _completedDownload({
+  required String localRelativePath,
+  required String tempRelativePath,
+  required int sizeBytes,
+}) {
+  final now = DateTime.utc(2026, 5, 31, 18);
+  return DownloadItem(
+    identity: _identity(),
+    title: 'Remote Song',
+    artist: 'Artist',
+    album: 'Album',
+    status: DownloadStatus.completed,
+    progressBytes: sizeBytes,
+    totalBytes: sizeBytes,
+    sizeBytes: sizeBytes,
+    localRelativePath: localRelativePath,
+    tempRelativePath: tempRelativePath,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
   );
 }
 
