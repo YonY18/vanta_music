@@ -114,6 +114,45 @@ void main() {
     expect(await database.getDownload('subsonic:home::song-temp'), isNull);
     expect(await paths.tempFile.exists(), isFalse);
   });
+
+  test(
+    'cleans queued and downloading rows only for the deleted server',
+    () async {
+      final store = await buildSubsonicServerStore(
+        directory: tempDir,
+        secretStore: InMemorySubsonicSecretStore(),
+        downloadDatabase: database,
+        downloadStorage: storage,
+      );
+      await store.saveServer(_server('home'), password: 'home-secret');
+      await store.saveServer(_server('work'), password: 'work-secret');
+
+      await database.putDownload(
+        _completedDownload(
+          _identity('home', 'song-queued'),
+        ).copyWith(status: DownloadStatus.queued, completedAt: null),
+      );
+      await database.putDownload(
+        _completedDownload(
+          _identity('home', 'song-downloading'),
+        ).copyWith(status: DownloadStatus.downloading, completedAt: null),
+      );
+      await database.putDownload(
+        _completedDownload(
+          _identity('work', 'song-keep'),
+        ).copyWith(status: DownloadStatus.downloading, completedAt: null),
+      );
+
+      await store.deleteServer('home');
+
+      expect(await database.getDownload('subsonic:home::song-queued'), isNull);
+      expect(
+        await database.getDownload('subsonic:home::song-downloading'),
+        isNull,
+      );
+      expect(await database.getDownload('subsonic:work::song-keep'), isNotNull);
+    },
+  );
 }
 
 SubsonicServerConfig _server(String id) {

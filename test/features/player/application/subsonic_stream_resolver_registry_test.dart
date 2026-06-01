@@ -64,7 +64,9 @@ void main() {
       'resolver-local-first',
     );
     addTearDown(() => tempDir.delete(recursive: true));
-    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
+    final storage = FileDownloadStorage(
+      appSupportDirectory: () async => tempDir,
+    );
     final database = DownloadDatabase.inMemory();
     addTearDown(database.close);
     final locations = await storage.resolvePaths(
@@ -94,9 +96,15 @@ void main() {
     final result = await resolver.resolve(item);
 
     expect(result, locations.finalFile.uri);
-    expect(item.id, 'subsonic://track?serverId=https-music-example-com-alice&id=song-1');
+    expect(
+      item.id,
+      'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+    );
     expect(item.extras?['canonicalUri'], item.id);
-    expect(item.extras?['trackId'], 'subsonic:https-music-example-com-alice:song-1');
+    expect(
+      item.extras?['trackId'],
+      'subsonic:https-music-example-com-alice:song-1',
+    );
   });
 
   test('falls back to remote streaming when completed file is missing', () async {
@@ -104,7 +112,9 @@ void main() {
       'resolver-missing-file',
     );
     addTearDown(() => tempDir.delete(recursive: true));
-    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
+    final storage = FileDownloadStorage(
+      appSupportDirectory: () async => tempDir,
+    );
     final database = DownloadDatabase.inMemory();
     addTearDown(database.close);
     final locations = await storage.resolvePaths(
@@ -138,49 +148,108 @@ void main() {
     expect(updated?.lastValidatedAt, isNotNull);
   });
 
-  test('fails with offline-unavailable when local file is invalid and remote is down', () async {
-    final tempDir = await Directory.systemTemp.createTemp(
-      'resolver-invalid-file',
-    );
-    addTearDown(() => tempDir.delete(recursive: true));
-    final storage = FileDownloadStorage(appSupportDirectory: () async => tempDir);
-    final database = DownloadDatabase.inMemory();
-    addTearDown(database.close);
-    final locations = await storage.resolvePaths(
-      _identity(),
-      fileExtension: 'mp3',
-    );
-    await locations.finalFile.parent.create(recursive: true);
-    await locations.finalFile.writeAsBytes(const []);
-    await database.putDownload(
-      _completedDownload(
-        localRelativePath: locations.finalRelativePath,
-        tempRelativePath: locations.tempRelativePath,
-        sizeBytes: 0,
-      ),
-    );
-    final resolver = SubsonicStreamResolverRegistry(
-      store: await _storeWithServer(),
-      clientFactory: ({required server, required password}) => _ThrowingSubsonicClient(
-        error: const SubsonicUnavailableFailure('Server unavailable.'),
-      ),
-      downloadDatabase: database,
-      downloadStorage: storage,
-    );
-
-    await expectLater(
-      () => resolver.resolve(_canonicalItem()),
-      throwsA(
-        isA<RemoteTrackResolveException>()
-            .having((error) => error.retryable, 'retryable', isTrue)
-            .having(
-              (error) => error.message,
-              'message',
-              contains('Offline copy is unavailable.'),
+  test(
+    'fails with offline-unavailable when local file is invalid and remote is down',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resolver-invalid-file',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final storage = FileDownloadStorage(
+        appSupportDirectory: () async => tempDir,
+      );
+      final database = DownloadDatabase.inMemory();
+      addTearDown(database.close);
+      final locations = await storage.resolvePaths(
+        _identity(),
+        fileExtension: 'mp3',
+      );
+      await locations.finalFile.parent.create(recursive: true);
+      await locations.finalFile.writeAsBytes(const []);
+      await database.putDownload(
+        _completedDownload(
+          localRelativePath: locations.finalRelativePath,
+          tempRelativePath: locations.tempRelativePath,
+          sizeBytes: 0,
+        ),
+      );
+      final resolver = SubsonicStreamResolverRegistry(
+        store: await _storeWithServer(),
+        clientFactory: ({required server, required password}) =>
+            _ThrowingSubsonicClient(
+              error: const SubsonicUnavailableFailure('Server unavailable.'),
             ),
-      ),
-    );
-  });
+        downloadDatabase: database,
+        downloadStorage: storage,
+      );
+
+      await expectLater(
+        () => resolver.resolve(_canonicalItem()),
+        throwsA(
+          isA<RemoteTrackResolveException>()
+              .having((error) => error.retryable, 'retryable', isTrue)
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Offline copy is unavailable.'),
+              ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'keeps canonical identity stable across repeated offline resolves',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resolver-offline-repeat',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final storage = FileDownloadStorage(
+        appSupportDirectory: () async => tempDir,
+      );
+      final database = DownloadDatabase.inMemory();
+      addTearDown(database.close);
+      final locations = await storage.resolvePaths(
+        _identity(),
+        fileExtension: 'mp3',
+      );
+      await locations.finalFile.parent.create(recursive: true);
+      await locations.finalFile.writeAsBytes([1, 2, 3, 4]);
+      await database.putDownload(
+        _completedDownload(
+          localRelativePath: locations.finalRelativePath,
+          tempRelativePath: locations.tempRelativePath,
+          sizeBytes: 4,
+        ),
+      );
+
+      final item = _canonicalItem();
+      final resolver = SubsonicStreamResolverRegistry(
+        store: await _storeWithServer(),
+        clientFactory: ({required server, required password}) {
+          fail('offline replay should stay local while the download is valid');
+        },
+        downloadDatabase: database,
+        downloadStorage: storage,
+      );
+
+      final first = await resolver.resolve(item);
+      final second = await resolver.resolve(item);
+
+      expect(first, locations.finalFile.uri);
+      expect(second, locations.finalFile.uri);
+      expect(
+        item.id,
+        'subsonic://track?serverId=https-music-example-com-alice&id=song-1',
+      );
+      expect(item.extras?['canonicalUri'], item.id);
+      expect(
+        item.extras?['trackId'],
+        'subsonic:https-music-example-com-alice:song-1',
+      );
+    },
+  );
 
   test('preserves direct local media item URIs', () async {
     final resolver = SubsonicStreamResolverRegistry(

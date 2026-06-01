@@ -210,6 +210,31 @@ void main() {
   });
 
   test(
+    'returns cached remote artwork for offline downloaded tracks without network',
+    () async {
+      final remoteTrack = _remoteTrackWithCoverArtId();
+      final store = _FakeStore(readPathValue: '/tmp/offline-remote.jpg');
+      final remote = _ThrowingRemoteSource();
+      final resolver = ArtworkCacheResolver(
+        store: store,
+        source: _FakeSource(result: null),
+        embeddedSource: _FakeEmbeddedSource(result: null),
+        remoteSource: remote,
+      );
+
+      final resolution = await resolver.resolve(
+        track: remoteTrack,
+        sizePx: 160,
+      );
+
+      expect(resolution.path, '/tmp/offline-remote.jpg');
+      expect(resolution.hasArtwork, isTrue);
+      expect(resolution.isFallback, isFalse);
+      expect(remote.calls, 0);
+    },
+  );
+
+  test(
     'coalesces concurrent remote requests for the same server-scoped key',
     () async {
       final remoteTrack = _remoteTrackWithCoverArtId();
@@ -387,5 +412,15 @@ class _DelayedRemoteSource implements RemoteArtworkBytesSource {
     requestedUris.add(uri);
     if (delay > Duration.zero) await Future<void>.delayed(delay);
     return result;
+  }
+}
+
+class _ThrowingRemoteSource implements RemoteArtworkBytesSource {
+  int calls = 0;
+
+  @override
+  Future<Uint8List?> fetch({required Uri uri, required int sizePx}) async {
+    calls += 1;
+    throw StateError('network should stay unused for cached offline artwork');
   }
 }

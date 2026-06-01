@@ -5,12 +5,16 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:on_audio_query/on_audio_query.dart';
+import 'package:vanta_music/app/router.dart';
 import 'package:vanta_music/features/library/application/library_providers.dart';
+import 'package:vanta_music/features/downloads/application/download_providers.dart';
+import 'package:vanta_music/features/downloads/domain/download_item.dart';
 import 'package:vanta_music/features/library/domain/album.dart';
 import 'package:vanta_music/features/library/domain/artist.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/library/presentation/library_screen.dart';
 import 'package:vanta_music/features/library_intelligence/application/library_intelligence_providers.dart';
+import 'package:vanta_music/features/library_intelligence/application/library_intelligence_refresh.dart';
 import 'package:vanta_music/features/library_intelligence/domain/library_snapshot.dart';
 import 'package:vanta_music/features/premium_metadata/application/premium_metadata_providers.dart';
 import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dart';
@@ -199,6 +203,96 @@ void main() {
       expect(find.text('Remote library'), findsOneWidget);
       expect(find.text('Navidrome'), findsOneWidget);
       expect(find.text('Remote Only'), findsOneWidget);
+    },
+  );
+
+  testWidgets('opens the downloads screen from the library app bar', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tracksProvider.overrideWith((ref) async => const <Track>[]),
+          libraryIntelligenceRefreshProvider.overrideWith(
+            (ref) => LibraryIntelligenceRefresh(),
+          ),
+          groupedDownloadsProvider.overrideWith(
+            (ref) => const AsyncData(
+              GroupedDownloads(
+                active: <DownloadItem>[],
+                completed: <DownloadItem>[],
+                failed: <DownloadItem>[],
+              ),
+            ),
+          ),
+          downloadsSummaryProvider.overrideWith(
+            (ref) => const AsyncData(
+              DownloadsSummary(
+                totalCount: 0,
+                activeCount: 0,
+                completedCount: 0,
+                failedCount: 0,
+              ),
+            ),
+          ),
+          downloadStorageSummaryProvider.overrideWith(
+            (ref) => Stream.value(
+              const DownloadStorageSummary(completedCount: 0, totalBytes: 0),
+            ),
+          ),
+        ],
+        child: MaterialApp.router(routerConfig: buildAppRouter()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Downloads'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Downloads'), findsOneWidget);
+    expect(find.text('No downloads yet'), findsOneWidget);
+  });
+
+  testWidgets(
+    'keeps album and playlist bulk download affordances out of scope',
+    (tester) async {
+      final playlist = Playlist(
+        id: 'p1',
+        name: 'Remote mix',
+        tracks: [_track('1', title: 'Playlist song')],
+      );
+
+      await tester.pumpLibraryScreen(
+        tracks: [_track('1', title: 'Album song')],
+        remoteTracks: [
+          _track(
+            'subsonic:server-a:remote-1',
+            title: 'Remote track',
+            providerId: 'subsonic:server-a',
+            uri: Uri.parse('subsonic://track?serverId=server-a&id=remote-1'),
+          ),
+        ],
+        playlists: [playlist],
+      );
+
+      await tester.tap(find.widgetWithText(Tab, 'Remote'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Download actions'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(Tab, 'Library'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(Tab, 'Albums'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Download album'), findsNothing);
+      expect(find.byTooltip('Download album'), findsNothing);
+
+      await tester.tap(find.widgetWithText(Tab, 'Playlists'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Remote mix'), findsOneWidget);
+      expect(find.text('Download playlist'), findsNothing);
+      expect(find.byTooltip('Download playlist'), findsNothing);
     },
   );
 
@@ -780,7 +874,10 @@ class _NoopArtworkCacheStore implements ArtworkCacheStore {
 
 class _NoopArtworkBytesSource implements ArtworkBytesSource {
   @override
-  Future<Uint8List?> fetch({required int artworkId, required int sizePx}) async {
+  Future<Uint8List?> fetch({
+    required int artworkId,
+    required int sizePx,
+  }) async {
     return null;
   }
 }
