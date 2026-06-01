@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum TrackQuickActionType { toggleFavorite, addToPlaylist }
+enum TrackQuickActionType { toggleFavorite, addToPlaylist, download }
 
 class TrackQuickAction {
   const TrackQuickAction({
@@ -14,7 +14,10 @@ class TrackQuickAction {
   final IconData icon;
 }
 
-List<TrackQuickAction> buildTrackQuickActions({required bool isFavorite}) {
+List<TrackQuickAction> buildTrackQuickActions({
+  required bool isFavorite,
+  bool includeDownloadAction = false,
+}) {
   return [
     TrackQuickAction(
       type: TrackQuickActionType.toggleFavorite,
@@ -26,5 +29,11 @@ List<TrackQuickAction> buildTrackQuickActions({required bool isFavorite}) {
       label: 'Agregar a playlist',
       icon: Icons.playlist_add_rounded,
     ),
+    if (includeDownloadAction)
+      const TrackQuickAction(
+        type: TrackQuickActionType.download,
+        label: 'Downloads',
+        icon: Icons.download_rounded,
+      ),
   ];
 }

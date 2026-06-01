@@ -4,6 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:vanta_music/features/downloads/application/download_providers.dart';
+import 'package:vanta_music/features/downloads/domain/download_item.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/application/player_controller.dart';
 import 'package:vanta_music/features/player/presentation/now_playing_screen.dart';
@@ -187,14 +189,122 @@ void main() {
 
     expect(control.retryRequested, isTrue);
   });
+
+  testWidgets(
+    'shows offline download actions in track info for remote tracks',
+    (tester) async {
+      final remoteItem = _item(
+        'remote-1',
+        providerId: 'subsonic:server-a',
+        uri: 'subsonic://track?serverId=server-a&id=remote-1',
+      );
+      final download =
+          DownloadItem.createQueued(
+            identity: const DownloadIdentity(
+              providerFamily: 'subsonic',
+              providerId: 'subsonic:server-a',
+              serverId: 'server-a',
+              trackId: 'remote-1',
+              remoteItemId: 'subsonic:server-a:remote-1',
+              canonicalUri: 'subsonic://track?serverId=server-a&id=remote-1',
+            ),
+            title: 'Track remote-1',
+            artist: 'Artist',
+            album: 'Album',
+            now: DateTime.utc(2026, 6, 1),
+          ).copyWith(
+            status: DownloadStatus.downloading,
+            totalBytes: 100,
+            progressBytes: 40,
+          );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            mediaItemProvider.overrideWith((ref) => Stream.value(remoteItem)),
+            currentQueueProvider.overrideWith(
+              (ref) => Stream.value([remoteItem]),
+            ),
+            playbackPositionProvider.overrideWith(
+              (ref) => Stream.value(Duration.zero),
+            ),
+            playbackDurationProvider.overrideWith(
+              (ref) => Stream.value(const Duration(minutes: 3)),
+            ),
+            playbackStateProvider.overrideWith(
+              (ref) => Stream.value(PlaybackState()),
+            ),
+            playerControllerProvider.overrideWithValue(
+              PlayerController(_FakePlayerAudioControl()),
+            ),
+            downloadItemProvider.overrideWith(
+              (ref, downloadKey) => Stream.value(
+                downloadKey == download.downloadKey ? download : null,
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: NowPlayingScreen()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Track info'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Offline download'), findsOneWidget);
+      expect(find.text('Cancel download'), findsOneWidget);
+      expect(find.text('Download for offline'), findsNothing);
+    },
+  );
+
+  testWidgets('keeps offline download actions hidden for local tracks', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mediaItemProvider.overrideWith((ref) => Stream.value(_item('a'))),
+          currentQueueProvider.overrideWith(
+            (ref) => Stream.value([_item('a')]),
+          ),
+          playbackPositionProvider.overrideWith(
+            (ref) => Stream.value(Duration.zero),
+          ),
+          playbackDurationProvider.overrideWith(
+            (ref) => Stream.value(const Duration(minutes: 3)),
+          ),
+          playbackStateProvider.overrideWith(
+            (ref) => Stream.value(PlaybackState()),
+          ),
+          playerControllerProvider.overrideWithValue(
+            PlayerController(_FakePlayerAudioControl()),
+          ),
+        ],
+        child: const MaterialApp(home: NowPlayingScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Track info'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Offline download'), findsNothing);
+    expect(find.text('Download for offline'), findsNothing);
+  });
 }
 
-MediaItem _item(String id) => MediaItem(
-  id: id,
-  title: 'Track $id',
-  artist: 'Artist',
-  extras: {'trackId': id, 'providerId': 'local'},
-);
+MediaItem _item(String id, {String providerId = 'local', String? uri}) =>
+    MediaItem(
+      id: uri ?? id,
+      title: 'Track $id',
+      artist: 'Artist',
+      album: 'Album',
+      extras: {
+        'trackId': id,
+        'providerId': providerId,
+        'canonicalUri': uri ?? id,
+      },
+    );
 
 class _ControlledMetadataOverrideStore implements MetadataOverrideStore {
   final Completer<MetadataOverride?> _completer =

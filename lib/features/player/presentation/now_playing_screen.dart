@@ -10,6 +10,7 @@ import '../../../shared/artwork_cache/artwork_cache_providers.dart';
 import '../../../shared/artwork_cache/artwork_precache.dart';
 import '../../../shared/utils/duration_format.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
+import '../../downloads/presentation/download_track_actions.dart';
 import '../../library/domain/track.dart';
 import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../application/media_item_artwork_request.dart';
@@ -355,6 +356,8 @@ void _showTrackInfoSheet(BuildContext context, MediaItem item) {
                       title: const Text('Add to queue end'),
                       onTap: () => controller.addToQueueEnd(track),
                     ),
+                    const SizedBox(height: 8),
+                    DownloadTrackActionsSection(track: track),
                   ],
                 ],
               ),

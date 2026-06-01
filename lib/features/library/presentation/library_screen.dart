@@ -7,6 +7,7 @@ import '../../../app/theme.dart';
 import '../../../shared/widgets/artwork_tile.dart';
 import '../../../shared/widgets/artwork_query_sizing.dart';
 import '../../../shared/artwork_cache/artwork_cache_providers.dart';
+import '../../downloads/presentation/download_track_actions.dart';
 import '../../player/application/player_controller.dart';
 import '../../player/presentation/mini_player.dart';
 import '../application/folder_library_controller.dart';
@@ -36,6 +37,11 @@ class LibraryScreen extends ConsumerWidget {
         appBar: AppBar(
           title: const _VantaAppTitle(),
           actions: [
+            IconButton(
+              tooltip: 'Downloads',
+              onPressed: () => context.push('/downloads'),
+              icon: const Icon(Icons.download_rounded),
+            ),
             IconButton(
               tooltip: 'Abrir carpeta',
               onPressed: () => _pickFolder(context, ref),
@@ -1143,6 +1149,7 @@ class _RemoteLibraryTab extends ConsumerWidget {
                   child: _TrackTile(
                     track: items[index],
                     deferArtwork: deferArtwork,
+                    trailing: DownloadTrackActionButton(track: items[index]),
                     onTap: () => ref
                         .read(playerControllerProvider)
                         .playTracks(items, index),
@@ -1170,6 +1177,10 @@ class _RemoteLibraryTab extends ConsumerWidget {
                       onAddToPlaylist: () => showAddToPlaylistSheet(
                         context: context,
                         ref: ref,
+                        track: items[index],
+                      ),
+                      onOpenDownloads: () => showDownloadTrackActionsSheet(
+                        context: context,
                         track: items[index],
                       ),
                     ),
@@ -1669,6 +1680,7 @@ class _TrackTile extends ConsumerWidget {
     required this.onToggleFavorite,
     required this.onAddToPlaylist,
     required this.onOpenActions,
+    this.trailing,
     this.deferArtwork = false,
     this.sourceLabel,
   });
@@ -1679,6 +1691,7 @@ class _TrackTile extends ConsumerWidget {
   final VoidCallback onToggleFavorite;
   final VoidCallback onAddToPlaylist;
   final VoidCallback onOpenActions;
+  final Widget? trailing;
   final bool deferArtwork;
   final String? sourceLabel;
 
@@ -1755,6 +1768,7 @@ class _TrackTile extends ConsumerWidget {
                   ],
                 ),
               ),
+              if (trailing != null) ...[trailing!],
               IconButton(
                 tooltip: isFavorite
                     ? 'Quitar de favoritos'
@@ -2164,6 +2178,9 @@ class _SearchResultsViewState extends ConsumerState<_SearchResultsView> {
                   track: remoteState.tracks[index],
                   deferArtwork: deferArtwork,
                   sourceLabel: remoteState.sourceLabel,
+                  trailing: DownloadTrackActionButton(
+                    track: remoteState.tracks[index],
+                  ),
                   onTap: () => widget.onTrackSelected(
                     context,
                     ref,
@@ -2194,6 +2211,10 @@ class _SearchResultsViewState extends ConsumerState<_SearchResultsView> {
                     onAddToPlaylist: () => showAddToPlaylistSheet(
                       context: context,
                       ref: ref,
+                      track: remoteState.tracks[index],
+                    ),
+                    onOpenDownloads: () => showDownloadTrackActionsSheet(
+                      context: context,
                       track: remoteState.tracks[index],
                     ),
                   ),
@@ -2300,8 +2321,12 @@ Future<void> showTrackQuickActionsSheet({
   required bool isFavorite,
   required Future<void> Function() onToggleFavorite,
   required Future<void> Function() onAddToPlaylist,
+  Future<void> Function()? onOpenDownloads,
 }) async {
-  final actions = buildTrackQuickActions(isFavorite: isFavorite);
+  final actions = buildTrackQuickActions(
+    isFavorite: isFavorite,
+    includeDownloadAction: onOpenDownloads != null,
+  );
 
   await showModalBottomSheet<void>(
     context: context,
@@ -2326,6 +2351,10 @@ Future<void> showTrackQuickActionsSheet({
               Navigator.of(context).pop();
               if (action.type == TrackQuickActionType.toggleFavorite) {
                 await onToggleFavorite();
+                return;
+              }
+              if (action.type == TrackQuickActionType.download) {
+                await onOpenDownloads?.call();
                 return;
               }
               await onAddToPlaylist();
