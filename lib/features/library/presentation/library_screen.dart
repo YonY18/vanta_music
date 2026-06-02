@@ -105,9 +105,12 @@ class LibraryScreen extends ConsumerWidget {
     ref.invalidate(tracksProvider);
     ref.invalidate(albumsProvider);
     ref.invalidate(artistsProvider);
+    ref.invalidate(remoteLibraryUiStateProvider);
+    ref.invalidate(remoteLibraryTracksProvider);
+    ref.invalidate(remoteSearchStateProvider);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Re-escaneando biblioteca local...')),
+      const SnackBar(content: Text('Actualizando biblioteca...')),
     );
   }
 }

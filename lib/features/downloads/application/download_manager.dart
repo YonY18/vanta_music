@@ -50,6 +50,7 @@ class DownloadManager {
   final List<DownloadSourceAdapter> adapters;
   final int maxConcurrent;
   final Set<String> _pendingKeys = <String>{};
+  final Set<String> _cancelledKeys = <String>{};
 
   Set<String> get pendingKeys => Set<String>.unmodifiable(_pendingKeys);
 
@@ -102,6 +103,7 @@ class DownloadManager {
   Future<void> cancel(String key) async {
     final item = await database.getDownload(key);
     if (item == null) return;
+    _cancelledKeys.add(key);
     await storage.deleteArtifacts(tempRelativePath: item.tempRelativePath);
     await database.putDownload(
       item.copyWith(
@@ -118,6 +120,7 @@ class DownloadManager {
   Future<void> retry(String key) async {
     final item = await database.getDownload(key);
     if (item == null) return;
+    _cancelledKeys.remove(key);
     final queued = item.copyWith(
       status: DownloadStatus.queued,
       progressBytes: 0,
@@ -192,8 +195,10 @@ class DownloadManager {
     try {
       await storage.deleteArtifacts(tempRelativePath: paths.tempRelativePath);
       await for (final chunk in adapter.open(request)) {
+        _throwIfCancelled(item.downloadKey);
         progress += chunk.length;
         await storage.writeTempChunk(paths.tempRelativePath, chunk);
+        _throwIfCancelled(item.downloadKey);
         await database.putDownload(
           started.copyWith(
             progressBytes: progress,
@@ -201,6 +206,7 @@ class DownloadManager {
           ),
         );
       }
+      _throwIfCancelled(item.downloadKey);
       final file = await storage.promoteCompletedFile(
         tempRelativePath: paths.tempRelativePath,
         finalRelativePath: paths.finalRelativePath,
@@ -215,6 +221,17 @@ class DownloadManager {
           errorCode: null,
           errorMessage: null,
           completedAt: DateTime.now().toUtc(),
+          updatedAt: DateTime.now().toUtc(),
+        ),
+      );
+    } on _DownloadCancelledException {
+      await storage.deleteArtifacts(tempRelativePath: paths.tempRelativePath);
+      await database.putDownload(
+        started.copyWith(
+          status: DownloadStatus.failed,
+          retryable: true,
+          errorCode: 'cancelled',
+          errorMessage: 'Download cancelled by user.',
           updatedAt: DateTime.now().toUtc(),
         ),
       );
@@ -242,7 +259,12 @@ class DownloadManager {
       );
     } finally {
       _pendingKeys.remove(item.downloadKey);
+      _cancelledKeys.remove(item.downloadKey);
     }
+  }
+
+  void _throwIfCancelled(String key) {
+    if (_cancelledKeys.contains(key)) throw const _DownloadCancelledException();
   }
 
   Future<void> _refreshPendingKeys() async {
@@ -254,4 +276,8 @@ class DownloadManager {
         )).map((item) => item.downloadKey),
       );
   }
+}
+
+class _DownloadCancelledException implements Exception {
+  const _DownloadCancelledException();
 }

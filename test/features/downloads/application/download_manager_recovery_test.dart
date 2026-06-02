@@ -109,6 +109,39 @@ void main() {
     expect(states['song-b'], DownloadStatus.failed);
     expect(states['song-c'], DownloadStatus.completed);
   });
+
+  test('cancelling an active download prevents final promotion', () async {
+    final controller = StreamController<List<int>>();
+    final manager = DownloadManager(
+      database: database,
+      storage: storage,
+      adapters: [
+        _FakeDownloadAdapter(streams: {'song-cancel': controller.stream}),
+      ],
+    );
+    final queued = await manager.enqueue(_request(trackId: 'song-cancel'));
+    final paths = await storage.resolvePaths(
+      queued.identity,
+      fileExtension: 'mp3',
+    );
+
+    final processing = manager.processQueue();
+    await Future<void>.delayed(Duration.zero);
+
+    controller.add([1, 2, 3]);
+    await Future<void>.delayed(Duration.zero);
+    await manager.cancel(queued.downloadKey);
+    controller.add([4, 5, 6]);
+    await controller.close();
+    await processing;
+
+    final cancelled = await manager.getDownload(queued.downloadKey);
+    expect(cancelled?.status, DownloadStatus.failed);
+    expect(cancelled?.errorCode, 'cancelled');
+    expect(cancelled?.retryable, isTrue);
+    expect(await paths.finalFile.exists(), isFalse);
+    expect(await paths.tempFile.exists(), isFalse);
+  });
 }
 
 DownloadRequest _request({required String trackId}) {
