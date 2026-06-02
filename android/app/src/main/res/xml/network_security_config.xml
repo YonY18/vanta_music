@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Vanta Music supports user-owned self-hosted music servers.
+
+        Many home Navidrome/Subsonic instances run on local HTTP endpoints such as
+        http://192.168.x.x:4533 and do not have HTTPS certificates. Android blocks
+        cleartext traffic by default, which prevents ExoPlayer from streaming those
+        tracks even when API browsing succeeds.
+
+        Public/exposed servers should still prefer HTTPS.
+    -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

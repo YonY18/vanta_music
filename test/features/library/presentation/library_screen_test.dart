@@ -623,6 +623,37 @@ void main() {
     },
   );
 
+  testWidgets('global refresh also reloads the active remote library', (
+    tester,
+  ) async {
+    final provider = _FlakyRemoteMusicProvider(
+      firstError: StateError('unused'),
+      failFirstAttempt: false,
+      recoveredTracks: [
+        _track(
+          'remote-1',
+          title: 'Recovered Remote',
+          providerId: 'subsonic:server-a',
+          uri: Uri.parse('subsonic://track?serverId=server-a&id=remote-1'),
+        ),
+      ],
+    );
+
+    await tester.pumpLibraryScreen(remoteProvider: provider);
+    await tester.tap(find.widgetWithText(Tab, 'Remote'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recovered Remote'), findsOneWidget);
+    expect(provider.attempts, 1);
+
+    await tester.tap(find.byTooltip('Re-escanear biblioteca'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Actualizando biblioteca...'), findsOneWidget);
+    expect(provider.attempts, 2);
+  });
+
   testWidgets('search shows debounced remote loading and source labels', (
     tester,
   ) async {
