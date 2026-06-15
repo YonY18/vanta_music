@@ -12,6 +12,7 @@ import '../../library_intelligence/application/library_intelligence_sink.dart';
 import '../../library_intelligence/infrastructure/file_library_intelligence_store.dart';
 import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../../providers/infrastructure/subsonic_server_store.dart';
+import '../infrastructure/file_audio_settings_store.dart';
 import '../infrastructure/file_playback_session_store.dart';
 import '../infrastructure/vanta_audio_handler.dart';
 import 'subsonic_stream_resolver_registry.dart';
@@ -21,6 +22,8 @@ final audioHandlerProvider = Provider<VantaAudioHandler>((ref) {
 });
 
 Future<VantaAudioHandler> initAudioHandler() async {
+  final audioSettingsStore = FileAudioSettingsStore();
+  final audioSettings = await audioSettingsStore.load();
   final intelligenceStore = FileLibraryIntelligenceStore();
   final intelligenceSink = LibraryIntelligenceSink(
     store: intelligenceStore,
@@ -62,6 +65,7 @@ Future<VantaAudioHandler> initAudioHandler() async {
       androidStopForegroundOnPause: false,
     ),
   );
+  await handler.applyAudioSettings(audioSettings);
   await handler.restoreSessionIfAvailable();
   return handler;
 }

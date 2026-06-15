@@ -1,9 +1,12 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
+import 'package:vanta_music/features/player/domain/audio_settings.dart';
 import 'package:vanta_music/features/player/infrastructure/vanta_audio_handler.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('VantaAudioHandler queue helpers', () {
     test(
       'removes a queued item by media id while preserving the remaining order',
@@ -189,6 +192,16 @@ void main() {
         expect(result.failures.single.retryable, isTrue);
       },
     );
+
+    test('stores audio settings without adding playback processing', () async {
+      final handler = VantaAudioHandler();
+      addTearDown(handler.dispose);
+
+      const settings = AudioSettings(crossfade: true, replayGain: true);
+      await handler.applyAudioSettings(settings);
+
+      expect(handler.audioSettings, settings);
+    });
   });
 }
 

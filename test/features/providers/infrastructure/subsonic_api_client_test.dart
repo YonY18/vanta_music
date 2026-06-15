@@ -202,6 +202,10 @@ void main() {
 
     expect(streamUri.path, '/rest/stream.view');
     expect(streamUri.queryParameters['id'], 'song-42');
+    expect(streamUri.queryParameters.containsKey('format'), isFalse);
+    expect(streamUri.queryParameters.containsKey('maxBitRate'), isFalse);
+    expect(streamUri.queryParameters.containsKey('bitRate'), isFalse);
+    expect(streamUri.queryParameters.containsKey('transcode'), isFalse);
     expect(coverUri.path, '/rest/getCoverArt.view');
     expect(coverUri.queryParameters['id'], 'cover-7');
   });
