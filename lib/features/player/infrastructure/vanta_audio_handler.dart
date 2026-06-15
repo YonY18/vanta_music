@@ -9,6 +9,7 @@ import '../../library/domain/track.dart';
 import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../application/player_controller.dart';
 import '../application/playback_session_store.dart';
+import '../domain/audio_settings.dart';
 import '../domain/playback_session.dart';
 
 class VantaAudioHandler extends BaseAudioHandler
@@ -33,6 +34,7 @@ class VantaAudioHandler extends BaseAudioHandler
   }
 
   final AudioPlayer _player = AudioPlayer();
+
   final PlaybackSessionStore? _sessionStore;
   final InMemoryFileValidationCache _validationCache;
   final LibraryIntelligenceSink? _intelligenceSink;
@@ -44,6 +46,9 @@ class VantaAudioHandler extends BaseAudioHandler
   bool _restoring = false;
   String? _lastCompletedTrackKey;
   RemoteTrackFailure? _lastRemoteFailure;
+  AudioSettings _audioSettings = AudioSettings.defaults;
+
+  AudioSettings get audioSettings => _audioSettings;
 
   Future<void> restoreSessionIfAvailable() async {
     final store = _sessionStore;
@@ -78,6 +83,10 @@ class VantaAudioHandler extends BaseAudioHandler
   Stream<Duration> get positionStream => _player.positionStream;
   @override
   Stream<Duration?> get durationStream => _player.durationStream;
+
+  Future<void> applyAudioSettings(AudioSettings settings) async {
+    _audioSettings = settings;
+  }
 
   Future<void> setQueueAndPlay(
     List<Track> tracks, {

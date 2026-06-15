@@ -38,6 +38,11 @@ class LibraryScreen extends ConsumerWidget {
           title: const _VantaAppTitle(),
           actions: [
             IconButton(
+              tooltip: 'Audio settings',
+              onPressed: () => context.push('/audio-settings'),
+              icon: const Icon(Icons.tune_rounded),
+            ),
+            IconButton(
               tooltip: 'Downloads',
               onPressed: () => context.push('/downloads'),
               icon: const Icon(Icons.download_rounded),
@@ -109,9 +114,9 @@ class LibraryScreen extends ConsumerWidget {
     ref.invalidate(remoteLibraryTracksProvider);
     ref.invalidate(remoteSearchStateProvider);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Actualizando biblioteca...')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Actualizando biblioteca...')));
   }
 }
 
