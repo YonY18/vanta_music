@@ -111,7 +111,7 @@ class _SettingsCard extends StatelessWidget {
             icon: Icons.queue_music_rounded,
             title: 'Gapless Playback',
             subtitle:
-                'Keeps album and playlist transitions continuous when the source path supports it.',
+                'Stored locally. Vanta\'s current queue path already uses continuous transitions when platform and source support them.',
             value: settings.gaplessPlayback,
             onChanged: togglesEnabled ? controller.setGaplessPlayback : null,
           ),

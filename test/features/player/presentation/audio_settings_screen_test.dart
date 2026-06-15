@@ -40,6 +40,12 @@ void main() {
     expect(find.text('No compression'), findsOneWidget);
     expect(find.text('No forced normalization'), findsOneWidget);
     expect(find.text('Playback Options'), findsOneWidget);
+    expect(
+      find.text(
+        'Stored locally. Vanta\'s current queue path already uses continuous transitions when platform and source support them.',
+      ),
+      findsOneWidget,
+    );
     expect(find.widgetWithText(SwitchListTile, 'Crossfade'), findsOneWidget);
     expect(
       find.text(

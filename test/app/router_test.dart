@@ -5,6 +5,9 @@ import 'package:vanta_music/app/router.dart';
 import 'package:vanta_music/app/theme.dart';
 import 'package:vanta_music/features/downloads/application/download_providers.dart';
 import 'package:vanta_music/features/downloads/domain/download_item.dart';
+import 'package:vanta_music/features/player/application/audio_settings_controller.dart';
+import 'package:vanta_music/features/player/application/audio_settings_store.dart';
+import 'package:vanta_music/features/player/domain/audio_settings.dart';
 
 void main() {
   testWidgets('opens the downloads route', (tester) async {
@@ -65,8 +68,14 @@ void main() {
   });
 
   testWidgets('opens the audio settings route', (tester) async {
+    final store = _FakeAudioSettingsStore();
+
     await tester.pumpWidget(
       ProviderScope(
+        overrides: [
+          audioSettingsStoreProvider.overrideWithValue(store),
+          applyAudioSettingsProvider.overrideWithValue((settings) async {}),
+        ],
         child: MaterialApp.router(
           theme: buildVantaDarkTheme(),
           routerConfig: buildAppRouter(initialLocation: '/audio-settings'),
@@ -79,6 +88,12 @@ void main() {
     expect(find.text('Clean Audio Path'), findsOneWidget);
     expect(find.text('Playback Options'), findsOneWidget);
     expect(find.text('Gapless Playback'), findsOneWidget);
+    expect(
+      find.text(
+        'Stored locally. Vanta\'s current queue path already uses continuous transitions when platform and source support them.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('ReplayGain'), findsOneWidget);
     expect(find.text('Crossfade'), findsOneWidget);
     expect(find.text('Prefer Original Stream'), findsOneWidget);
@@ -102,4 +117,12 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+class _FakeAudioSettingsStore implements AudioSettingsStore {
+  @override
+  Future<AudioSettings> load() async => AudioSettings.defaults;
+
+  @override
+  Future<void> save(AudioSettings settings) async {}
 }

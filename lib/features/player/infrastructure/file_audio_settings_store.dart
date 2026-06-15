@@ -18,25 +18,33 @@ class FileAudioSettingsStore implements AudioSettingsStore {
 
   @override
   Future<AudioSettings> load() async {
-    final file = await _file();
-    if (!await file.exists()) return AudioSettings.defaults;
-
-    final Object? decoded;
     try {
-      decoded = jsonDecode(await file.readAsString());
+      final file = await _file();
+      if (!await file.exists()) return AudioSettings.defaults;
+
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map<String, dynamic>) return AudioSettings.defaults;
+      return AudioSettings.fromJson(decoded);
     } on FormatException {
       return AudioSettings.defaults;
+    } on FileSystemException {
+      return AudioSettings.defaults;
+    } catch (_) {
+      return AudioSettings.defaults;
     }
-
-    if (decoded is! Map<String, dynamic>) return AudioSettings.defaults;
-    return AudioSettings.fromJson(decoded);
   }
 
   @override
   Future<void> save(AudioSettings settings) async {
-    final file = await _file();
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(settings.toJson()));
+    try {
+      final file = await _file();
+      await file.parent.create(recursive: true);
+      await file.writeAsString(jsonEncode(settings.toJson()));
+    } on FileSystemException {
+      // Ignore persistence failures and keep playback/settings callers alive.
+    } catch (_) {
+      // Ignore persistence failures and keep playback/settings callers alive.
+    }
   }
 
   Future<File> _file() async {
