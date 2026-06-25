@@ -14,7 +14,6 @@ coverage/
 
 # Generated Dart files
 *.g.dart
-!lib/features/downloads/infrastructure/download_database.g.dart
 *.freezed.dart
 *.mocks.dart
 *.config.dart
