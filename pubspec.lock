@@ -1013,6 +1013,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.5.3"
+  vanta_audio_engine:
+    dependency: "direct main"
+    description:
+      path: "packages/vanta_audio_engine"
+      relative: true
+    source: path
+    version: "0.0.1"
   vector_math:
     dependency: transitive
     description:

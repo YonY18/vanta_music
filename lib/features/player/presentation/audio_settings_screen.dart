@@ -116,6 +116,11 @@ class _SettingsCard extends StatelessWidget {
             onChanged: togglesEnabled ? controller.setGaplessPlayback : null,
           ),
           const Divider(height: 1, color: VantaColors.border),
+          _EngineSelector(
+            value: settings.audioEngineType,
+            onChanged: togglesEnabled ? controller.setAudioEngineType : null,
+          ),
+          const Divider(height: 1, color: VantaColors.border),
           _ToggleTile(
             icon: Icons.compare_arrows_rounded,
             title: 'Crossfade',
@@ -219,6 +224,51 @@ class _SectionHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _EngineSelector extends StatelessWidget {
+  const _EngineSelector({required this.value, required this.onChanged});
+
+  final VantaAudioEngineType value;
+  final ValueChanged<VantaAudioEngineType>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.memory_rounded),
+      title: const Text('Audio Engine'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 6),
+          DropdownButtonFormField<VantaAudioEngineType>(
+            initialValue: value,
+            items: const [
+              DropdownMenuItem(
+                value: VantaAudioEngineType.androidDefault,
+                child: Text('Android Default / Current Engine'),
+              ),
+              DropdownMenuItem(
+                value: VantaAudioEngineType.vantaNativeExperimental,
+                child: Text('Vanta Native Engine (Experimental)'),
+              ),
+            ],
+            onChanged: onChanged == null
+                ? null
+                : (value) {
+                    if (value != null) onChanged!(value);
+                  },
+            dropdownColor: VantaColors.surfaceHigh,
+            decoration: const InputDecoration(
+              helperText:
+                  'Native is experimental: local files only, with fallback on errors.',
+            ),
+          ),
+        ],
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
     );
   }
 }

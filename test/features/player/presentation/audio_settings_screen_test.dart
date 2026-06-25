@@ -40,6 +40,8 @@ void main() {
     expect(find.text('No compression'), findsOneWidget);
     expect(find.text('No forced normalization'), findsOneWidget);
     expect(find.text('Playback Options'), findsOneWidget);
+    expect(find.text('Audio Engine'), findsOneWidget);
+    expect(find.text('Android Default / Current Engine'), findsOneWidget);
     expect(
       find.text(
         'Stored locally. Vanta\'s current queue path already uses continuous transitions when platform and source support them.',
@@ -101,6 +103,18 @@ void main() {
     await tester.tap(find.widgetWithText(SwitchListTile, 'ReplayGain'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
+      find.text('Audio Engine'),
+      -250,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byType(DropdownButtonFormField<VantaAudioEngineType>),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vanta Native Engine (Experimental)').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
       find.widgetWithText(SwitchListTile, 'Prefer Original Stream'),
       250,
       scrollable: find.byType(Scrollable),
@@ -113,11 +127,23 @@ void main() {
 
     expect(store.saved, [
       const AudioSettings(replayGain: true),
-      const AudioSettings(replayGain: true, preferOriginalStream: false),
+      const AudioSettings(
+        replayGain: true,
+        audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+      ),
+      const AudioSettings(
+        replayGain: true,
+        preferOriginalStream: false,
+        audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+      ),
     ]);
     expect(
       applied.last,
-      const AudioSettings(replayGain: true, preferOriginalStream: false),
+      const AudioSettings(
+        replayGain: true,
+        preferOriginalStream: false,
+        audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+      ),
     );
     expect(
       find.text(
@@ -150,6 +176,11 @@ void main() {
       find.widgetWithText(SwitchListTile, 'Gapless Playback'),
     );
     expect(gapless.onChanged, isNull);
+    final engineSelector = tester
+        .widget<DropdownButtonFormField<VantaAudioEngineType>>(
+          find.byType(DropdownButtonFormField<VantaAudioEngineType>),
+        );
+    expect(engineSelector.onChanged, isNull);
 
     store.complete(AudioSettings.defaults);
     await tester.pumpAndSettle();
