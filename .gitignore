@@ -18,6 +18,7 @@ coverage/
 *.mocks.dart
 *.config.dart
 *.drift.dart
+!lib/features/downloads/infrastructure/download_database.g.dart
 
 # Flutter build artifacts
 ios/Flutter/.last_build_id

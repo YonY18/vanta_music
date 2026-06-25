@@ -79,14 +79,14 @@ class NativeVantaAudioEngine {
     String? contentDisplayName,
   }) async {
     if (uri.isScheme('content')) {
-      if (!_hasSupportedContentWavEvidence(
+      if (_hasUnsupportedContentAudioEvidence(
         uri,
         contentMimeType: contentMimeType,
         contentDisplayName: contentDisplayName,
       )) {
         throw const NativeVantaAudioEngineException(
-          'unsupported-format',
-          'Native engine currently supports only local WAV content sources.',
+          'unsupported_format',
+          'Native engine currently supports only local WAV or FLAC content sources.',
         );
       }
 
@@ -111,14 +111,14 @@ class NativeVantaAudioEngine {
     final file = File(uri.toFilePath());
     if (!await file.exists()) {
       throw const NativeVantaAudioEngineException(
-        'file-not-found',
+        'file_not_found',
         'Local source does not exist.',
       );
     }
     if (!_isSupportedLocalFile(file.path)) {
       throw const NativeVantaAudioEngineException(
-        'unsupported-format',
-        'Native engine currently supports only local WAV files.',
+        'unsupported_format',
+        'Native engine currently supports only local WAV or FLAC files.',
       );
     }
 
@@ -145,7 +145,7 @@ class NativeVantaAudioEngine {
       await _methodChannel.invokeMethod<void>(method, arguments);
     } on PlatformException catch (error) {
       throw NativeVantaAudioEngineException(
-        error.code,
+        error.code.replaceAll('-', '_'),
         error.message ?? 'Native audio engine call failed.',
       );
     }
@@ -166,23 +166,47 @@ class NativeVantaAudioEngine {
   }
 
   bool _isSupportedLocalFile(String path) =>
-      path.toLowerCase().endsWith('.wav');
+      _hasSupportedExtension(path.toLowerCase());
 
-  bool _hasSupportedContentWavEvidence(
+  bool _hasUnsupportedContentAudioEvidence(
     Uri uri, {
     String? contentMimeType,
     String? contentDisplayName,
   }) {
     final mimeType = contentMimeType?.toLowerCase();
-    if (mimeType == 'audio/wav' ||
+    if (mimeType == 'audio/flac' ||
+        mimeType == 'audio/x-flac' ||
+        mimeType == 'audio/wav' ||
         mimeType == 'audio/x-wav' ||
         mimeType == 'audio/wave') {
+      return false;
+    }
+    if (mimeType != null && mimeType.isNotEmpty) {
       return true;
     }
 
     final displayName = contentDisplayName?.toLowerCase();
-    if (displayName != null && displayName.endsWith('.wav')) return true;
+    if (displayName != null && _hasAudioExtension(displayName)) {
+      return !_hasSupportedExtension(displayName);
+    }
 
-    return uri.path.toLowerCase().endsWith('.wav');
+    final path = uri.path.toLowerCase();
+    if (_hasAudioExtension(path)) return !_hasSupportedExtension(path);
+
+    return false;
+  }
+
+  bool _hasSupportedExtension(String value) {
+    return value.endsWith('.wav') || value.endsWith('.flac');
+  }
+
+  bool _hasAudioExtension(String value) {
+    return value.endsWith('.wav') ||
+        value.endsWith('.flac') ||
+        value.endsWith('.mp3') ||
+        value.endsWith('.m4a') ||
+        value.endsWith('.aac') ||
+        value.endsWith('.ogg') ||
+        value.endsWith('.opus');
   }
 }

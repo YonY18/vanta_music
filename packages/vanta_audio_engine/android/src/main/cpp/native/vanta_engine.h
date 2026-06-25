@@ -7,16 +7,23 @@
 #include "vanta_output.h"
 
 namespace vanta_audio_engine {
+enum class VantaLoadError {
+  none,
+  unsupported_format,
+  decode_error,
+  output_error
+};
+
 class VantaEngine {
- public:
+public:
   VantaEngine();
   ~VantaEngine();
 
-  VantaEngine(const VantaEngine&) = delete;
-  VantaEngine& operator=(const VantaEngine&) = delete;
+  VantaEngine(const VantaEngine &) = delete;
+  VantaEngine &operator=(const VantaEngine &) = delete;
 
   bool Init();
-  bool LoadLocalPath(const char* path);
+  bool LoadLocalPath(const char *path);
   bool Play();
   bool Pause();
   bool Stop();
@@ -24,10 +31,11 @@ class VantaEngine {
   bool SetVolume(float volume);
   uint64_t PositionMs() const;
   int64_t DurationMs() const;
+  const char *LoadErrorCode() const;
   void Dispose();
 
- private:
-  static void DataCallback(ma_device* device, void* output, const void* input,
+private:
+  static void DataCallback(ma_device *device, void *output, const void *input,
                            ma_uint32 frame_count);
   void ResetUnlocked();
   bool IsPreparedLockedState() const;
@@ -37,5 +45,6 @@ class VantaEngine {
   mutable std::mutex state_mutex_{};
   mutable std::mutex decoder_mutex_{};
   bool initialized_ = false;
+  VantaLoadError last_load_error_ = VantaLoadError::none;
 };
-}  // namespace vanta_audio_engine
+} // namespace vanta_audio_engine

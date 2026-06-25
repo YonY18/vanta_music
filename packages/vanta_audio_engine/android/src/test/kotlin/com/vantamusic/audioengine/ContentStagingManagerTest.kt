@@ -76,4 +76,22 @@ class ContentStagingManagerTest {
         assertFalse(staged.name.contains(displayNameOrUri))
         assertFalse(staged.name.contains("content://"))
     }
+
+    @Test
+    fun flacStagingKeepsSafeGeneratedNameWithFlacExtension() {
+        val stagingDir = temporaryFolder.newFolder("staging")
+        val manager = ContentStagingManager(
+            stagingDirectory = stagingDir,
+            idGenerator = { "flac-id" },
+        )
+
+        val result = manager.stage(
+            input = ByteArrayInputStream(byteArrayOf(1, 2, 3)),
+            extension = ".flac",
+        )
+
+        val staged = assertIs<ContentStagingResult.Staged>(result).file
+        assertEquals("content-flac-id.flac", staged.name)
+        assertTrue(staged.name.startsWith(ContentStagingManager.STAGED_CONTENT_PREFIX))
+    }
 }

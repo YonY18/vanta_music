@@ -30,7 +30,11 @@ class VantaAudioHandler extends BaseAudioHandler
     _eventSub = _player.playbackEventStream.listen(_broadcastState);
     _indexSub = _player.currentIndexStream.listen((index) {
       final items = queue.value;
-      if (index != null && index >= 0 && index < items.length) {
+      if (_currentEngineHasFullQueue &&
+          index != null &&
+          index >= 0 &&
+          index < items.length) {
+        _queueIndex = index;
         mediaItem.add(items[index]);
       }
       _broadcastState(_player.playbackEvent);
@@ -47,15 +51,24 @@ class VantaAudioHandler extends BaseAudioHandler
   final VantaAudioEngineSelection _engineSelection;
   late final StreamSubscription<PlaybackEvent> _eventSub;
   late final StreamSubscription<int?> _indexSub;
+  StreamSubscription<VantaPlaybackState>? _nativeStateSub;
 
   Timer? _persistDebounce;
   bool _restoring = false;
   bool _nativeEngineAttempted = false;
+  bool _nativeEngineActive = false;
+  bool _nativeEnginePlaying = false;
+  bool _handlingNativeCompletion = false;
+  bool _nativeCompletionArmed = false;
+  bool _currentEngineHasFullQueue = false;
+  int? _queueIndex;
   String? _lastCompletedTrackKey;
   RemoteTrackFailure? _lastRemoteFailure;
   AudioSettings _audioSettings = AudioSettings.defaults;
 
   AudioSettings get audioSettings => _audioSettings;
+
+  bool get isNativeEngineActiveForTesting => _nativeEngineActive;
 
   Future<void> restoreSessionIfAvailable() async {
     final store = _sessionStore;
@@ -73,11 +86,13 @@ class VantaAudioHandler extends BaseAudioHandler
     _restoring = true;
     queue.add(safe.queue);
     mediaItem.add(safe.queue[safe.currentIndex]);
+    _queueIndex = safe.currentIndex;
     await _player.setAudioSources(
       await _audioSourcesFor(safe.queue),
       initialIndex: safe.currentIndex,
       initialPosition: safe.position,
     );
+    _currentEngineHasFullQueue = true;
     _restoring = false;
     _broadcastState(_player.playbackEvent);
 
@@ -120,13 +135,22 @@ class VantaAudioHandler extends BaseAudioHandler
       0,
       resolved.queueItems.length - 1,
     );
-    await _tryNativeEngineOrFallback(
+    queue.add(resolved.queueItems);
+    mediaItem.add(resolved.queueItems[safeInitialIndex]);
+    _queueIndex = safeInitialIndex;
+
+    final nativeReady = await _tryNativeEngineOrFallback(
       resolved.uris[safeInitialIndex],
       originalItem: resolved.queueItems[safeInitialIndex],
       title: resolved.queueItems[safeInitialIndex].title,
     );
-    queue.add(resolved.queueItems);
-    mediaItem.add(resolved.queueItems[safeInitialIndex]);
+    if (nativeReady) {
+      _currentEngineHasFullQueue = false;
+      _logAudioEngine('owner=native-engine action=playback-route');
+      await play();
+      _scheduleSessionPersist();
+      return;
+    }
 
     await _player.setAudioSources(
       [
@@ -139,6 +163,8 @@ class VantaAudioHandler extends BaseAudioHandler
       initialIndex: safeInitialIndex,
       initialPosition: Duration.zero,
     );
+    _currentEngineHasFullQueue = true;
+    _logAudioEngine('owner=current-engine action=playback-route');
     await play();
     _scheduleSessionPersist();
   }
@@ -161,14 +187,24 @@ class VantaAudioHandler extends BaseAudioHandler
 
     queue.add(resolved.queueItems);
     this.mediaItem.add(resolved.queueItems.single);
-    await _tryNativeEngineOrFallback(
+    _queueIndex = 0;
+    final nativeReady = await _tryNativeEngineOrFallback(
       resolved.uris.single,
       originalItem: resolved.queueItems.single,
       title: resolved.queueItems.single.title,
     );
+    if (nativeReady) {
+      _currentEngineHasFullQueue = false;
+      _logAudioEngine('owner=native-engine action=playback-route');
+      await play();
+      _scheduleSessionPersist();
+      return;
+    }
     await _player.setAudioSource(
       AudioSource.uri(resolved.uris.single, tag: resolved.queueItems.single),
     );
+    _currentEngineHasFullQueue = false;
+    _logAudioEngine('owner=current-engine action=playback-route');
     await play();
     _scheduleSessionPersist();
   }
@@ -176,6 +212,25 @@ class VantaAudioHandler extends BaseAudioHandler
   @override
   Future<void> play() async {
     _emitPlayStarted();
+    if (_nativeEngineActive) {
+      try {
+        await _nativeEngine?.play();
+        _nativeEnginePlaying = true;
+        _broadcastNativeState(playing: true);
+        _logAudioEngine('play native-engine');
+        return;
+      } catch (error) {
+        await _releaseNativeEngineAfterAttempt();
+        _logAudioEngine(
+          'fallback=current-engine reason=native-play-error error=${_safeError(error)}',
+        );
+        final prepared = await _prepareCurrentEngineForCurrentItem();
+        if (!prepared) {
+          _logAudioEngine('fallback=none reason=current-item-unavailable');
+          return;
+        }
+      }
+    }
     _logAudioEngine('play current-engine');
     return _player.play();
   }
@@ -183,20 +238,55 @@ class VantaAudioHandler extends BaseAudioHandler
   @override
   Future<void> pause() async {
     _emitProgress();
+    if (_nativeEngineActive) {
+      try {
+        await _nativeEngine?.pause();
+        _nativeEnginePlaying = false;
+        _nativeCompletionArmed = false;
+        _broadcastNativeState(playing: false);
+        _logAudioEngine('pause native-engine');
+        return;
+      } catch (error) {
+        await _releaseNativeEngineAfterAttempt();
+        _logAudioEngine(
+          'fallback=none reason=native-pause-error action=native-released error=${_safeError(error)}',
+        );
+        return;
+      }
+    }
     _logAudioEngine('pause current-engine');
     return _player.pause();
   }
 
   @override
   Future<void> seek(Duration position) async {
+    if (_nativeEngineActive) {
+      try {
+        await _nativeEngine?.seek(position);
+        _broadcastNativeState(
+          playing: _nativeEnginePlaying,
+          positionOverride: position,
+        );
+        _emitProgress(positionOverride: position);
+        return;
+      } catch (error) {
+        await _releaseNativeEngineAfterAttempt();
+        _logAudioEngine(
+          'fallback=current-engine reason=native-seek-error error=${_safeError(error)}',
+        );
+        final prepared = await _prepareCurrentEngineForCurrentItem();
+        if (!prepared) {
+          _logAudioEngine('fallback=none reason=current-item-unavailable');
+          return;
+        }
+      }
+    }
     await _player.seek(position);
     _emitProgress(positionOverride: position);
   }
 
   @override
-  Future<void> skipToQueueItem(int index) => _player
-      .seek(Duration.zero, index: index)
-      .then((_) => _scheduleSessionPersist());
+  Future<void> skipToQueueItem(int index) => _skipToIndex(index);
 
   @override
   Future<void> removeQueueItemById(String mediaItemId) async {
@@ -205,7 +295,9 @@ class VantaAudioHandler extends BaseAudioHandler
     if (index < 0) return;
 
     queue.add(removeQueueItems(items, mediaItemId));
-    await _player.removeAudioSourceAt(index);
+    if (_currentEngineHasFullQueue) {
+      await _player.removeAudioSourceAt(index);
+    }
     _scheduleSessionPersist();
   }
 
@@ -213,11 +305,13 @@ class VantaAudioHandler extends BaseAudioHandler
   Future<void> playNext(Track track) async {
     final item = mediaItemFromTrack(track);
     final items = queue.value;
-    final currentIndex = _player.currentIndex;
+    final currentIndex = _currentQueueIndex;
     final insertIndex = _playNextIndex(items.length, currentIndex);
 
     queue.add(insertPlayNext(items, item, currentIndex: currentIndex));
-    await _player.insertAudioSource(insertIndex, await _audioSourceFor(item));
+    if (_currentEngineHasFullQueue) {
+      await _player.insertAudioSource(insertIndex, await _audioSourceFor(item));
+    }
     _scheduleSessionPersist();
   }
 
@@ -225,7 +319,9 @@ class VantaAudioHandler extends BaseAudioHandler
   Future<void> addToQueueEnd(Track track) async {
     final item = mediaItemFromTrack(track);
     queue.add(appendToQueueEnd(queue.value, item));
-    await _player.addAudioSource(await _audioSourceFor(item));
+    if (_currentEngineHasFullQueue) {
+      await _player.addAudioSource(await _audioSourceFor(item));
+    }
     _scheduleSessionPersist();
   }
 
@@ -247,7 +343,7 @@ class VantaAudioHandler extends BaseAudioHandler
         AudioSource.uri(resolved.uris.single, tag: resolved.queueItems.single),
       );
     } else {
-      final currentIndex = _player.currentIndex;
+      final currentIndex = _currentQueueIndex;
       final insertIndex = _playNextIndex(queue.value.length, currentIndex);
       queue.add(
         insertPlayNext(
@@ -271,12 +367,18 @@ class VantaAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> skipToNext() =>
-      _player.seekToNext().then((_) => _scheduleSessionPersist());
+  Future<void> skipToNext() {
+    final index = _currentQueueIndex;
+    if (index == null) return Future<void>.value();
+    return _skipToIndex(index + 1);
+  }
 
   @override
-  Future<void> skipToPrevious() =>
-      _player.seekToPrevious().then((_) => _scheduleSessionPersist());
+  Future<void> skipToPrevious() {
+    final index = _currentQueueIndex;
+    if (index == null) return Future<void>.value();
+    return _skipToIndex(index - 1);
+  }
 
   @override
   Future<void> stop() async {
@@ -290,6 +392,7 @@ class VantaAudioHandler extends BaseAudioHandler
   Future<void> dispose() async {
     await _eventSub.cancel();
     await _indexSub.cancel();
+    await _nativeStateSub?.cancel();
     _persistDebounce?.cancel();
     await _intelligenceSink?.dispose();
     await _disposeNativeEngineAfterAttempt();
@@ -460,7 +563,7 @@ class VantaAudioHandler extends BaseAudioHandler
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
-        queueIndex: event.currentIndex,
+        queueIndex: _currentQueueIndex ?? event.currentIndex,
         errorCode: _lastRemoteFailure == null
             ? null
             : (_lastRemoteFailure!.retryable
@@ -473,6 +576,38 @@ class VantaAudioHandler extends BaseAudioHandler
       _emitCompletedIfNeeded();
       _scheduleSessionPersist();
     }
+  }
+
+  void _broadcastNativeState({
+    required bool playing,
+    Duration positionOverride = Duration.zero,
+    AudioProcessingState processingState = AudioProcessingState.ready,
+  }) {
+    playbackState.add(
+      PlaybackState(
+        controls: [
+          MediaControl.skipToPrevious,
+          if (playing) MediaControl.pause else MediaControl.play,
+          MediaControl.skipToNext,
+        ],
+        systemActions: const {
+          MediaAction.seek,
+          MediaAction.seekForward,
+          MediaAction.seekBackward,
+          MediaAction.skipToNext,
+          MediaAction.skipToPrevious,
+          MediaAction.play,
+          MediaAction.pause,
+        },
+        androidCompactActionIndices: const [0, 1, 2],
+        processingState: processingState,
+        playing: playing,
+        updatePosition: positionOverride,
+        bufferedPosition: positionOverride,
+        speed: 1,
+        queueIndex: _currentQueueIndex,
+      ),
+    );
   }
 
   void _emitPlayStarted() {
@@ -505,6 +640,7 @@ class VantaAudioHandler extends BaseAudioHandler
 
   void _emitCompletedIfNeeded() {
     if (_player.processingState != ProcessingState.completed) return;
+    if (_nativeEngineActive) return;
     final sink = _intelligenceSink;
     final item = mediaItem.value;
     if (sink == null || item == null) return;
@@ -524,7 +660,7 @@ class VantaAudioHandler extends BaseAudioHandler
     _persistDebounce?.cancel();
     _persistDebounce = Timer(const Duration(milliseconds: 350), () async {
       final currentQueue = queue.value;
-      final index = _player.currentIndex;
+      final index = _currentQueueIndex;
       if (currentQueue.isEmpty || index == null || index < 0) return;
 
       await store.save(
@@ -551,6 +687,22 @@ class VantaAudioHandler extends BaseAudioHandler
     ], _streamResolverRegistry)).single;
     return AudioSource.uri(uri, tag: item);
   }
+
+  Future<bool> _prepareCurrentEngineForCurrentItem() async {
+    final index = _currentQueueIndex;
+    final items = queue.value;
+    if (index == null || index < 0 || index >= items.length) return false;
+
+    final item = items[index];
+    _queueIndex = index;
+    mediaItem.add(item);
+    await _player.setAudioSource(await _audioSourceFor(item));
+    _currentEngineHasFullQueue = false;
+    _logAudioEngine('owner=current-engine action=fallback-prepare');
+    return true;
+  }
+
+  int? get _currentQueueIndex => _queueIndex ?? _player.currentIndex;
 
   _SafeSessionResult? _safeSession(PlaybackSession session) {
     final pendingReconcileUris = <Uri>[];
@@ -599,23 +751,25 @@ class VantaAudioHandler extends BaseAudioHandler
     _lastRemoteFailure = failures.isEmpty ? null : failures.first;
   }
 
-  Future<void> tryNativeEngineOrFallbackForTesting(
+  Future<bool> tryNativeEngineOrFallbackForTesting(
     Uri uri, {
     required MediaItem originalItem,
     required String title,
   }) =>
       _tryNativeEngineOrFallback(uri, originalItem: originalItem, title: title);
 
-  Future<void> _tryNativeEngineOrFallback(
+  Future<bool> _tryNativeEngineOrFallback(
     Uri uri, {
     required MediaItem originalItem,
     required String title,
   }) async {
+    await _releaseNativeEngineAfterAttempt();
+
     if (!isOriginalLocalSourceForNative(originalItem)) {
       _logAudioEngine(
         'fallback=current-engine reason=non-local-original-source source=${_safeSourceLabel(uri)}',
       );
-      return;
+      return false;
     }
 
     final source = VantaAudioSource(
@@ -632,7 +786,7 @@ class VantaAudioHandler extends BaseAudioHandler
       _logAudioEngine(
         'fallback=current-engine reason=${_engineSelection.fallbackReason(source)} source=${_safeSourceLabel(uri)}',
       );
-      return;
+      return false;
     }
 
     final nativeEngine = _nativeEngine;
@@ -640,20 +794,34 @@ class VantaAudioHandler extends BaseAudioHandler
       _logAudioEngine(
         'fallback=current-engine reason=native-engine-unavailable',
       );
-      return;
+      return false;
     }
 
     try {
-      _logAudioEngine('attempt=native source=${_safeSourceLabel(uri)}');
+      _logAudioEngine(
+        'attempt=native reason=${_engineSelection.attemptReason(source)} source=${_safeSourceLabel(uri)}',
+      );
       _nativeEngineAttempted = true;
+      _nativeStateSub ??= nativeEngine.playbackState.listen(
+        _handleNativePlaybackState,
+        onError: (Object error) {
+          _logAudioEngine('native-state-error error=${_safeError(error)}');
+        },
+      );
       await nativeEngine.init();
       await nativeEngine.load(source);
+      _nativeEngineActive = true;
+      _nativeEnginePlaying = false;
+      _nativeCompletionArmed = false;
+      _broadcastNativeState(playing: false);
       _logAudioEngine('native-ready source=${_safeSourceLabel(uri)}');
+      return true;
     } catch (error) {
       await _releaseNativeEngineAfterAttempt();
       _logAudioEngine(
         'fallback=current-engine reason=native-error error=${_safeError(error)}',
       );
+      return false;
     }
   }
 
@@ -665,6 +833,10 @@ class VantaAudioHandler extends BaseAudioHandler
       _logAudioEngine('native-release-stop-failed error=${_safeError(error)}');
     } finally {
       _nativeEngineAttempted = false;
+      _nativeEngineActive = false;
+      _nativeEnginePlaying = false;
+      _handlingNativeCompletion = false;
+      _nativeCompletionArmed = false;
     }
   }
 
@@ -678,7 +850,116 @@ class VantaAudioHandler extends BaseAudioHandler
       );
     } finally {
       _nativeEngineAttempted = false;
+      await _nativeStateSub?.cancel();
+      _nativeStateSub = null;
     }
+  }
+
+  Future<void> _loadQueueItemForSelectedEngine(int index) async {
+    final items = queue.value;
+    if (index < 0 || index >= items.length) return;
+    final item = items[index];
+    _queueIndex = index;
+    mediaItem.add(item);
+    final uri = (await resolveQueueItemUris([
+      item,
+    ], _streamResolverRegistry)).single;
+    final nativeReady = await _tryNativeEngineOrFallback(
+      uri,
+      originalItem: item,
+      title: item.title,
+    );
+    if (nativeReady) {
+      _currentEngineHasFullQueue = false;
+      _logAudioEngine('owner=native-engine action=playback-route');
+      return;
+    }
+
+    await _player.setAudioSource(AudioSource.uri(uri, tag: item));
+    _currentEngineHasFullQueue = false;
+    _logAudioEngine('owner=current-engine action=playback-route');
+  }
+
+  Future<void> _skipToIndex(int index) async {
+    final items = queue.value;
+    if (index < 0 || index >= items.length) return;
+    final shouldResume = _nativeEngineActive
+        ? _nativeEnginePlaying
+        : _player.playing;
+    if (_currentEngineHasFullQueue && !_nativeEngineActive) {
+      await _player.seek(Duration.zero, index: index);
+      _queueIndex = index;
+      mediaItem.add(items[index]);
+    } else {
+      await _loadQueueItemForSelectedEngine(index);
+    }
+    if (shouldResume) await play();
+    _scheduleSessionPersist();
+  }
+
+  void _handleNativePlaybackState(VantaPlaybackState state) {
+    if (!_nativeEngineActive) return;
+    switch (state.status) {
+      case VantaPlaybackStatus.playing:
+        _nativeEnginePlaying = true;
+        _nativeCompletionArmed = true;
+        _broadcastNativeState(playing: true);
+      case VantaPlaybackStatus.paused:
+        _nativeEnginePlaying = false;
+        _nativeCompletionArmed = false;
+        _broadcastNativeState(playing: false);
+      case VantaPlaybackStatus.completed:
+        if (!_nativeCompletionArmed) return;
+        _nativeCompletionArmed = false;
+        unawaited(_advanceAfterNativeCompletion());
+      case VantaPlaybackStatus.error:
+        _logAudioEngine('native-state-error');
+      case VantaPlaybackStatus.idle:
+      case VantaPlaybackStatus.loading:
+      case VantaPlaybackStatus.ready:
+      case VantaPlaybackStatus.buffering:
+        break;
+    }
+  }
+
+  Future<void> _advanceAfterNativeCompletion() async {
+    if (_handlingNativeCompletion || !_nativeEngineActive) return;
+    _handlingNativeCompletion = true;
+    _nativeEnginePlaying = false;
+    _logAudioEngine('native-completed');
+    _emitNativeCompletedIfNeeded();
+
+    final currentIndex = _currentQueueIndex;
+    final items = queue.value;
+    if (currentIndex == null || currentIndex + 1 >= items.length) {
+      _broadcastNativeState(
+        playing: false,
+        processingState: AudioProcessingState.completed,
+      );
+      _handlingNativeCompletion = false;
+      return;
+    }
+
+    final nextIndex = currentIndex + 1;
+    _logAudioEngine('advance-next owner=native-completed');
+    await _loadQueueItemForSelectedEngine(nextIndex);
+    _handlingNativeCompletion = false;
+    await play();
+    _scheduleSessionPersist();
+  }
+
+  void _emitNativeCompletedIfNeeded() {
+    final sink = _intelligenceSink;
+    final item = mediaItem.value;
+    if (sink == null || item == null) return;
+    final trackKey = normalizeTrackKey(item);
+    if (trackKey == null ||
+        trackKey.isEmpty ||
+        trackKey == _lastCompletedTrackKey) {
+      return;
+    }
+    sink.recordPlaybackCompleted(trackKey: trackKey);
+    _lastCompletedTrackKey = trackKey;
   }
 
   void _logAudioEngine(String message) {
