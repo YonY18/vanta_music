@@ -2,6 +2,8 @@ package com.vantamusic.audioengine
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
@@ -21,6 +23,9 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var positionSink: EventChannel.EventSink? = null
     private var durationSink: EventChannel.EventSink? = null
     private var stagedContentFile: File? = null
+    private val completionHandler = Handler(Looper.getMainLooper())
+    private var completionPolling = false
+    private var completionEmitted = false
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
@@ -42,6 +47,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        stopCompletionPolling()
         if (nativeLibraryLoaded) {
             disposeNative()
         }
@@ -84,66 +90,73 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("invalid-source", "Native load requires a local file path.", null)
                     return
                 }
-                if (!resolvedPath.lowercase().endsWith(".wav")) {
-                    result.error("unsupported-format", "Native engine currently supports only local WAV files.", null)
+                if (!hasSupportedAudioExtension(resolvedPath)) {
+                    result.error("unsupported_format", "Native engine currently supports only local WAV or FLAC files.", null)
                     return
                 }
                 if (!File(resolvedPath).isFile) {
-                    result.error("file-not-found", "Local source does not exist.", null)
+                    result.error("file_not_found", "Local source does not exist.", null)
                     return
                 }
                 emitState("loading")
+                stopCompletionPolling()
+                completionEmitted = false
                 if (loadNative(resolvedPath)) {
                     emitState("ready")
                     emitDuration()
                     positionSink?.success(positionMsNative())
                     result.success(null)
                 } else {
-                    emitState("error", "Native engine could not prepare this WAV file.")
+                    val errorCode = loadErrorCodeNative()
+                    emitState("error", "Native engine could not prepare this audio file.")
                     cleanupStagedContentFile()
-                    result.error("native-load-failed", "Native engine could not prepare this WAV file.", null)
+                    result.error(errorCode, "Native engine could not prepare this audio file.", null)
                 }
             }
             "play" -> {
                 if (!requireNativeLibrary(result)) return
                 if (playNative()) {
                     emitState("playing")
+                    startCompletionPolling()
                     result.success(null)
                 } else {
-                    emitState("error", "Native engine has no prepared local WAV file.")
-                    result.error("not-prepared", "Native engine has no prepared local WAV file.", null)
+                    emitState("error", "Native engine has no prepared local audio file.")
+                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
                 }
             }
             "pause" -> {
                 if (!requireNativeLibrary(result)) return
                 if (pauseNative()) {
+                    stopCompletionPolling()
                     emitPosition()
                     emitState("paused")
                     result.success(null)
                 } else {
-                    result.error("not-prepared", "Native engine has no prepared local WAV file.", null)
+                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
                 }
             }
             "stop" -> {
                 if (!requireNativeLibrary(result)) return
                 val stopped = stopNative()
+                stopCompletionPolling()
                 cleanupStagedContentFile()
                 if (stopped) {
                     positionSink?.success(0)
                     emitState("ready")
                     result.success(null)
                 } else {
-                    result.error("not-prepared", "Native engine has no prepared local WAV file.", null)
+                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
                 }
             }
             "seek" -> {
                 if (!requireNativeLibrary(result)) return
                 val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
                 if (seekNative(positionMs.coerceAtLeast(0L))) {
+                    completionEmitted = false
                     emitPosition()
                     result.success(null)
                 } else {
-                    result.error("not-prepared", "Native engine has no prepared local WAV file.", null)
+                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
                 }
             }
             "setVolume" -> {
@@ -152,11 +165,12 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 if (setVolumeNative(volume.coerceIn(0.0f, 1.0f))) {
                     result.success(null)
                 } else {
-                    result.error("not-prepared", "Native engine has no prepared local WAV file.", null)
+                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
                 }
             }
             "dispose" -> {
                 if (nativeLibraryLoaded) {
+                    stopCompletionPolling()
                     disposeNative()
                 }
                 cleanupStagedContentFile()
@@ -179,6 +193,35 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun emitDuration() {
         val durationMs = durationMsNative()
         durationSink?.success(if (durationMs >= 0L) durationMs else null)
+    }
+
+    private fun startCompletionPolling() {
+        if (completionPolling) return
+        completionPolling = true
+        completionHandler.post(completionPoll)
+    }
+
+    private fun stopCompletionPolling() {
+        completionPolling = false
+        completionHandler.removeCallbacks(completionPoll)
+    }
+
+    private val completionPoll = object : Runnable {
+        override fun run() {
+            if (!completionPolling) return
+
+            val positionMs = positionMsNative()
+            val durationMs = durationMsNative()
+            positionSink?.success(positionMs)
+            if (!completionEmitted && durationMs > 0L && positionMs >= durationMs) {
+                completionEmitted = true
+                completionPolling = false
+                emitState("completed")
+                return
+            }
+
+            completionHandler.postDelayed(this, 500L)
+        }
     }
 
     private fun requireNativeLibrary(result: MethodChannel.Result): Boolean {
@@ -206,7 +249,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (uri.scheme != "content") {
-            result.error("unsupported-source", "Native engine accepts only local WAV sources.", null)
+            result.error("unsupported_source", "Native engine accepts only local audio content sources.", null)
             return null
         }
 
@@ -215,8 +258,9 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val metadata = queryOpenableMetadata(uri)
         val resolvedDisplayName = metadata.displayName
         val resolvedSizeBytes = metadata.sizeBytes
-        if (!hasSupportedWavEvidence(uri, resolvedMimeType, resolvedDisplayName, suppliedMimeType, suppliedDisplayName)) {
-            result.error("unsupported-format", "Native engine currently supports only local WAV content sources.", null)
+        val extension = supportedExtension(uri, resolvedMimeType, resolvedDisplayName, suppliedMimeType, suppliedDisplayName)
+        if (extension == null) {
+            result.error("unsupported_format", "Native engine currently supports only local WAV or FLAC content sources.", null)
             return null
         }
         if (resolvedSizeBytes != null && resolvedSizeBytes > ContentStagingManager.MAX_STAGED_CONTENT_BYTES) {
@@ -234,7 +278,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return null
         }
 
-        return when (val stagingResult = stagingManager().stage(input, stagedContentFile)) {
+        return when (val stagingResult = stagingManager().stage(input, stagedContentFile, extension)) {
             is ContentStagingResult.Staged -> {
                 stagedContentFile = stagingResult.file
                 stagingResult.file.absolutePath
@@ -274,26 +318,38 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun hasSupportedWavEvidence(
+    private fun supportedExtension(
         uri: Uri,
         resolvedMimeType: String?,
         resolvedDisplayName: String?,
         suppliedMimeType: String?,
         suppliedDisplayName: String?,
-    ): Boolean {
-        return isSupportedWavMime(resolvedMimeType) ||
-            isSupportedWavMime(suppliedMimeType) ||
-            resolvedDisplayName?.lowercase()?.endsWith(".wav") == true ||
-            suppliedDisplayName?.lowercase()?.endsWith(".wav") == true ||
-            uri.path?.lowercase()?.endsWith(".wav") == true
+    ): String? {
+        return supportedMimeExtension(resolvedMimeType)
+            ?: supportedMimeExtension(suppliedMimeType)
+            ?: supportedPathExtension(resolvedDisplayName)
+            ?: supportedPathExtension(suppliedDisplayName)
+            ?: supportedPathExtension(uri.path)
     }
 
-    private fun isSupportedWavMime(mimeType: String?): Boolean {
+    private fun supportedMimeExtension(mimeType: String?): String? {
         return when (mimeType?.lowercase()) {
-            "audio/wav", "audio/x-wav", "audio/wave" -> true
-            else -> false
+            "audio/flac", "audio/x-flac" -> ".flac"
+            "audio/wav", "audio/x-wav", "audio/wave" -> ".wav"
+            else -> null
         }
     }
+
+    private fun supportedPathExtension(path: String?): String? {
+        val lower = path?.lowercase() ?: return null
+        return when {
+            lower.endsWith(".flac") -> ".flac"
+            lower.endsWith(".wav") -> ".wav"
+            else -> null
+        }
+    }
+
+    private fun hasSupportedAudioExtension(path: String): Boolean = supportedPathExtension(path) != null
 
     private fun cleanupStagedContentFile() {
         stagingManager().cleanupCurrent(stagedContentFile)
@@ -310,6 +366,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private external fun initNative(): Boolean
     private external fun loadNative(path: String): Boolean
+    private external fun loadErrorCodeNative(): String
     private external fun playNative(): Boolean
     private external fun pauseNative(): Boolean
     private external fun stopNative(): Boolean

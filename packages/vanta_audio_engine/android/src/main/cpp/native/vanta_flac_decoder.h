@@ -3,12 +3,10 @@
 #include <cstdint>
 
 #include "miniaudio.h"
-#include "vanta_flac_decoder.h"
 
 namespace vanta_audio_engine {
-class VantaDecoder {
+class VantaFlacDecoder {
 public:
-  bool SupportsLocalPath(const char *path) const;
   bool OpenLocalPath(const char *path);
   void Close();
   bool Seek(uint64_t position_ms);
@@ -20,13 +18,10 @@ public:
   ma_format OutputFormat() const;
   ma_uint32 OutputChannels() const;
   ma_uint32 SampleRate() const;
+  ma_uint64 TotalFrames() const;
 
 private:
-  enum class ActiveDecoder { none, wav, flac };
-
   ma_decoder decoder_{};
-  VantaFlacDecoder flac_decoder_{};
-  ActiveDecoder active_decoder_ = ActiveDecoder::none;
   bool ready_ = false;
   ma_uint64 total_frames_ = 0;
   ma_uint32 sample_rate_ = 0;

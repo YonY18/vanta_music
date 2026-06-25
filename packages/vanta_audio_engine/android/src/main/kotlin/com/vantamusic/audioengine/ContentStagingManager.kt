@@ -13,6 +13,7 @@ internal class ContentStagingManager(
     companion object {
         const val STAGED_CONTENT_PREFIX = "content-"
         const val STAGED_CONTENT_EXTENSION = ".wav"
+        const val STAGED_CONTENT_FLAC_EXTENSION = ".flac"
         const val MAX_STAGED_CONTENT_BYTES = 512L * 1024L * 1024L
         const val COPY_BUFFER_BYTES = 64 * 1024
     }
@@ -20,6 +21,7 @@ internal class ContentStagingManager(
     fun stage(
         input: InputStream,
         currentStagedFile: File? = null,
+        extension: String = STAGED_CONTENT_EXTENSION,
     ): ContentStagingResult {
         cleanupCurrent(currentStagedFile)
 
@@ -29,7 +31,7 @@ internal class ContentStagingManager(
 
         val staged = File(
             stagingDirectory,
-            "$STAGED_CONTENT_PREFIX${idGenerator()}$STAGED_CONTENT_EXTENSION",
+            "$STAGED_CONTENT_PREFIX${idGenerator()}${safeExtension(extension)}",
         )
 
         return try {
@@ -65,11 +67,18 @@ internal class ContentStagingManager(
         stagingDirectory.listFiles { file ->
             file.isFile &&
                 file.name.startsWith(STAGED_CONTENT_PREFIX) &&
-                file.name.endsWith(STAGED_CONTENT_EXTENSION)
+                (file.name.endsWith(STAGED_CONTENT_EXTENSION) || file.name.endsWith(STAGED_CONTENT_FLAC_EXTENSION))
         }?.forEach { file ->
             if (current == null || file.canonicalPath != current) {
                 file.delete()
             }
+        }
+    }
+
+    private fun safeExtension(extension: String): String {
+        return when (extension.lowercase()) {
+            STAGED_CONTENT_FLAC_EXTENSION -> STAGED_CONTENT_FLAC_EXTENSION
+            else -> STAGED_CONTENT_EXTENSION
         }
     }
 }

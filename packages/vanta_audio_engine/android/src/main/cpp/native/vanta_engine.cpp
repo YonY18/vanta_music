@@ -17,26 +17,35 @@ bool VantaEngine::Init() {
   return true;
 }
 
-bool VantaEngine::LoadLocalPath(const char* path) {
+bool VantaEngine::LoadLocalPath(const char *path) {
   if (path == nullptr || path[0] == '\0') {
     return false;
   }
   std::lock_guard<std::mutex> state_lock(state_mutex_);
 
   if (!initialized_ || !decoder_.SupportsLocalPath(path)) {
+    last_load_error_ = VantaLoadError::unsupported_format;
     return false;
   }
 
   ResetUnlocked();
 
   std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
-  if (!decoder_.OpenLocalPath(path) ||
-      !output_.Open(decoder_, VantaEngine::DataCallback, this)) {
+  if (!decoder_.OpenLocalPath(path)) {
     output_.Close();
     decoder_.Close();
+    last_load_error_ = VantaLoadError::decode_error;
     return false;
   }
 
+  if (!output_.Open(decoder_, VantaEngine::DataCallback, this)) {
+    output_.Close();
+    decoder_.Close();
+    last_load_error_ = VantaLoadError::output_error;
+    return false;
+  }
+
+  last_load_error_ = VantaLoadError::none;
   return true;
 }
 
@@ -84,25 +93,44 @@ int64_t VantaEngine::DurationMs() const {
   return decoder_.DurationMs();
 }
 
+const char *VantaEngine::LoadErrorCode() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  switch (last_load_error_) {
+  case VantaLoadError::unsupported_format:
+    return "unsupported_format";
+  case VantaLoadError::decode_error:
+    return "decode_error";
+  case VantaLoadError::output_error:
+    return "output_error";
+  case VantaLoadError::none:
+  default:
+    return "decode_error";
+  }
+}
+
 void VantaEngine::Dispose() {
   std::lock_guard<std::mutex> state_lock(state_mutex_);
   ResetUnlocked();
   initialized_ = false;
 }
 
-void VantaEngine::DataCallback(ma_device* device, void* output, const void* input,
-                               ma_uint32 frame_count) {
-  auto* engine = static_cast<VantaEngine*>(device->pUserData);
+void VantaEngine::DataCallback(ma_device *device, void *output,
+                               const void *input, ma_uint32 frame_count) {
+  auto *engine = static_cast<VantaEngine *>(device->pUserData);
   if (engine == nullptr) {
-    std::memset(output, 0, frame_count * ma_get_bytes_per_frame(device->playback.format,
-                                                                device->playback.channels));
+    std::memset(output, 0,
+                frame_count *
+                    ma_get_bytes_per_frame(device->playback.format,
+                                           device->playback.channels));
     return;
   }
 
   std::lock_guard<std::mutex> decoder_lock(engine->decoder_mutex_);
   if (!engine->decoder_.IsReady()) {
-    std::memset(output, 0, frame_count * ma_get_bytes_per_frame(device->playback.format,
-                                                                device->playback.channels));
+    std::memset(output, 0,
+                frame_count *
+                    ma_get_bytes_per_frame(device->playback.format,
+                                           device->playback.channels));
     return;
   }
 
@@ -120,25 +148,24 @@ bool VantaEngine::IsPreparedLockedState() const {
   std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
   return decoder_.IsReady() && output_.IsReady();
 }
-}  // namespace vanta_audio_engine
+} // namespace vanta_audio_engine
 
 static vanta_audio_engine::VantaEngine engine;
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_initNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_initNative(JNIEnv *,
+                                                                  jobject) {
   return engine.Init();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_loadNative(
-    JNIEnv* env,
-    jobject,
-    jstring path) {
+    JNIEnv *env, jobject, jstring path) {
   if (path == nullptr) {
     return false;
   }
 
-  const char* native_path = env->GetStringUTFChars(path, nullptr);
+  const char *native_path = env->GetStringUTFChars(path, nullptr);
   if (native_path == nullptr) {
     return false;
   }
@@ -148,44 +175,56 @@ Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_loadNative(
   return loaded;
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_loadErrorCodeNative(
+    JNIEnv *env, jobject) {
+  return env->NewStringUTF(engine.LoadErrorCode());
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_playNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_playNative(JNIEnv *,
+                                                                  jobject) {
   return engine.Play();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_pauseNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_pauseNative(JNIEnv *,
+                                                                   jobject) {
   return engine.Pause();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_stopNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_stopNative(JNIEnv *,
+                                                                  jobject) {
   return engine.Stop();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_seekNative(JNIEnv*, jobject,
-                                                                  jlong position_ms) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_seekNative(
+    JNIEnv *, jobject, jlong position_ms) {
   return engine.Seek(static_cast<uint64_t>(std::max<jlong>(0, position_ms)));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_setVolumeNative(JNIEnv*, jobject,
-                                                                       jfloat volume) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_setVolumeNative(
+    JNIEnv *, jobject, jfloat volume) {
   return engine.SetVolume(volume);
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_positionMsNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_positionMsNative(
+    JNIEnv *, jobject) {
   return static_cast<jlong>(engine.PositionMs());
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_durationMsNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_durationMsNative(
+    JNIEnv *, jobject) {
   return static_cast<jlong>(engine.DurationMs());
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_disposeNative(JNIEnv*, jobject) {
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_disposeNative(JNIEnv *,
+                                                                     jobject) {
   engine.Dispose();
 }
