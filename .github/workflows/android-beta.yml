@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-release-${{ github.ref }}
@@ -22,6 +22,8 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -33,6 +35,11 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -51,8 +58,15 @@ jobs:
       - name: Generate Dart code
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Run Vanta audio engine Android unit tests
+        working-directory: packages/vanta_audio_engine/android
+        run: gradle testDebugUnitTest
+
       - name: Analyze Dart code
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Check for focused Flutter tests
+        run: dart run tool/check_focused_tests.dart
 
       - name: Run Flutter tests when present
         shell: bash
@@ -66,6 +80,35 @@ jobs:
           fi
 
           flutter test
+
+      - name: Run Vanta audio engine package tests when present
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          package_dir="packages/vanta_audio_engine"
+          tests=("${package_dir}"/test/**/*_test.dart)
+
+          if (( ${#tests[@]} == 0 )); then
+            echo "No vanta_audio_engine package tests found. Skipping package flutter test."
+            exit 0
+          fi
+
+          pushd "${package_dir}"
+          flutter pub get
+          flutter test
+          popd
+
+      - name: Clean package generated artifacts
+        if: always()
+        shell: bash
+        run: |
+          rm -rf \
+            packages/vanta_audio_engine/.dart_tool \
+            packages/vanta_audio_engine/build \
+            packages/vanta_audio_engine/android/.gradle \
+            packages/vanta_audio_engine/android/.kotlin \
+            packages/vanta_audio_engine/android/build \
+            packages/vanta_audio_engine/android/.cxx
 
       - name: Prepare Android signing when secrets are available
         id: signing
@@ -112,8 +155,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: android-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: VantaMusic-${{ github.ref_name }}
+          path: release-artifacts
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: Vanta Music ${{ github.ref_name }}
@@ -126,5 +184,5 @@ jobs:
             Download the APK attached to this prerelease and install it on an Android device for internal testing.
 
             This build is intended for beta validation, not public store distribution.
-          files: build/app/outputs/flutter-apk/VantaMusic-${{ github.ref_name }}.apk
+          files: release-artifacts/VantaMusic-${{ github.ref_name }}.apk
           

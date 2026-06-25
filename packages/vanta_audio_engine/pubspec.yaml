@@ -1,0 +1,24 @@
+name: vanta_audio_engine
+description: Experimental Android-first native audio engine bridge for Vanta Music.
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.12.0
+  flutter: '>=3.38.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.vantamusic.audioengine
+        pluginClass: VantaAudioEnginePlugin

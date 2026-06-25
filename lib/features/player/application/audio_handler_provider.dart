@@ -14,6 +14,7 @@ import '../../providers/infrastructure/subsonic_api_client.dart';
 import '../../providers/infrastructure/subsonic_server_store.dart';
 import '../infrastructure/file_audio_settings_store.dart';
 import '../infrastructure/file_playback_session_store.dart';
+import '../infrastructure/native_vanta_engine_adapter.dart';
 import '../infrastructure/vanta_audio_handler.dart';
 import 'subsonic_stream_resolver_registry.dart';
 
@@ -49,6 +50,7 @@ Future<VantaAudioHandler> initAudioHandler() async {
     builder: () => VantaAudioHandler(
       sessionStore: FilePlaybackSessionStore(),
       intelligenceSink: intelligenceSink,
+      nativeEngine: NativeVantaEngineAdapter(),
       streamResolverRegistry: SubsonicStreamResolverRegistry(
         store: subsonicStore,
         clientFactory: ({required server, required password}) =>

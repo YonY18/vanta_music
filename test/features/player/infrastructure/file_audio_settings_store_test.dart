@@ -42,6 +42,7 @@ void main() {
       crossfade: true,
       replayGain: true,
       preferOriginalStream: false,
+      audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
     );
 
     await store.save(expected);

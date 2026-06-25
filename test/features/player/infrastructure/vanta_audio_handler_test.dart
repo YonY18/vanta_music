@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/domain/audio_settings.dart';
+import 'package:vanta_music/features/player/domain/vanta_audio_engine.dart';
 import 'package:vanta_music/features/player/infrastructure/vanta_audio_handler.dart';
 
 void main() {
@@ -140,6 +141,197 @@ void main() {
     );
 
     test(
+      'keeps downloaded Subsonic files on the current engine after resolution',
+      () async {
+        final item = MediaItem(
+          id: 'subsonic://track?serverId=server-a&id=remote-1',
+          title: 'Remote track',
+          extras: const {
+            'trackId': 'subsonic:server-a:remote-1',
+            'providerId': 'subsonic:server-a',
+            'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+          },
+        );
+        final registry = _FakeStreamResolverRegistry({
+          'subsonic:server-a::subsonic:server-a:remote-1': Uri.parse(
+            'file:///downloads/remote-1.flac',
+          ),
+        });
+
+        final resolved = await VantaAudioHandler.resolveQueueItemsSafely([
+          item,
+        ], registry);
+
+        expect(
+          resolved.uris.single,
+          Uri.parse('file:///downloads/remote-1.flac'),
+        );
+        expect(
+          VantaAudioHandler.isOriginalLocalFileForNative(
+            resolved.queueItems.single,
+          ),
+          isFalse,
+        );
+      },
+    );
+
+    test('allows native attempts only for original local file queue items', () {
+      final local = VantaAudioHandler.mediaItemFromTrack(
+        _track('local-1', 'file:///queue/local.wav'),
+      );
+      final staleRemote = MediaItem(
+        id: 'file:///downloads/remote-1.flac',
+        title: 'Remote track',
+        extras: const {
+          'trackId': 'remote-1',
+          'providerId': 'local',
+          'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+        },
+      );
+
+      expect(VantaAudioHandler.isOriginalLocalFileForNative(local), isTrue);
+      expect(
+        VantaAudioHandler.isOriginalLocalFileForNative(staleRemote),
+        isFalse,
+      );
+    });
+
+    test('allows native attempts for original local content queue items', () {
+      const localContent = MediaItem(
+        id: 'content://media/external/audio/media/local.wav',
+        title: 'Local content',
+        extras: {'providerId': 'local'},
+      );
+      const remoteContent = MediaItem(
+        id: 'content://media/external/audio/media/remote.wav',
+        title: 'Remote content',
+        extras: {
+          'providerId': 'subsonic:server-a',
+          'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+        },
+      );
+
+      expect(
+        VantaAudioHandler.isOriginalLocalSourceForNative(localContent),
+        isTrue,
+      );
+      expect(
+        VantaAudioHandler.isOriginalLocalSourceForNative(remoteContent),
+        isFalse,
+      );
+    });
+
+    test(
+      'passes eligible content WAV sources to the native fallback seam',
+      () async {
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        const item = MediaItem(
+          id: 'content://media/external/audio/media/1',
+          title: 'Local content',
+          extras: {
+            'providerId': 'local',
+            'contentMimeType': 'audio/wav',
+            'contentDisplayName': 'private-title.wav',
+          },
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(native.loadedSources.single.uri, Uri.parse(item.id));
+        expect(native.loadedSources.single.contentMimeType, 'audio/wav');
+        expect(
+          native.loadedSources.single.contentDisplayName,
+          'private-title.wav',
+        );
+      },
+    );
+
+    test('keeps non-WAV content sources on the current engine', () async {
+      final native = _RecordingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+      const item = MediaItem(
+        id: 'content://media/external/audio/media/1',
+        title: 'Local content',
+        extras: {'providerId': 'local', 'contentMimeType': 'audio/flac'},
+      );
+
+      await handler.tryNativeEngineOrFallbackForTesting(
+        Uri.parse(item.id),
+        originalItem: item,
+        title: item.title,
+      );
+
+      expect(native.loadedSources, isEmpty);
+    });
+
+    test(
+      'does not crash when native engine fails at the handler fallback seam',
+      () async {
+        final native = _ThrowingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.wav'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.wav'),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(native.initCalls, 1);
+        expect(native.loadCalls, 1);
+        expect(native.stopCalls, 1);
+      },
+    );
+
+    test('releases attempted native engine when handler stops', () async {
+      final native = _RecordingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+      final item = VantaAudioHandler.mediaItemFromTrack(
+        _track('local-1', 'file:///queue/local.wav'),
+      );
+
+      await handler.tryNativeEngineOrFallbackForTesting(
+        Uri.parse('file:///queue/local.wav'),
+        originalItem: item,
+        title: item.title,
+      );
+      await handler.stop();
+
+      expect(native.stopCalls, 1);
+    });
+
+    test(
       'skips one failed remote item while preserving playable queue order',
       () async {
         final local = VantaAudioHandler.mediaItemFromTrack(
@@ -260,4 +452,95 @@ class _PartiallyFailingStreamResolverRegistry
     if (failure != null) throw failure;
     return resolved[key] ?? Uri.parse(item.id);
   }
+}
+
+class _ThrowingNativeEngine implements VantaAudioEngine {
+  int initCalls = 0;
+  int loadCalls = 0;
+  int stopCalls = 0;
+
+  @override
+  Stream<VantaPlaybackState> get playbackState => const Stream.empty();
+
+  @override
+  Stream<Duration> get position => const Stream.empty();
+
+  @override
+  Stream<Duration?> get duration => const Stream.empty();
+
+  @override
+  Future<void> init() async {
+    initCalls++;
+  }
+
+  @override
+  Future<void> load(VantaAudioSource source) async {
+    loadCalls++;
+    throw const VantaAudioEngineException(
+      'native-not-ready',
+      'Native engine is not ready for playback yet.',
+    );
+  }
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> stop() async {
+    stopCalls++;
+  }
+
+  @override
+  Future<void> seek(Duration position) async {}
+
+  @override
+  Future<void> setVolume(double volume) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _RecordingNativeEngine implements VantaAudioEngine {
+  final loadedSources = <VantaAudioSource>[];
+  int stopCalls = 0;
+
+  @override
+  Stream<VantaPlaybackState> get playbackState => const Stream.empty();
+
+  @override
+  Stream<Duration> get position => const Stream.empty();
+
+  @override
+  Stream<Duration?> get duration => const Stream.empty();
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<void> load(VantaAudioSource source) async {
+    loadedSources.add(source);
+  }
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> stop() async {
+    stopCalls++;
+  }
+
+  @override
+  Future<void> seek(Duration position) async {}
+
+  @override
+  Future<void> setVolume(double volume) async {}
+
+  @override
+  Future<void> dispose() async {}
 }

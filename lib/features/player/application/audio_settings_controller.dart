@@ -41,6 +41,9 @@ class AudioSettingsController extends AsyncNotifier<AudioSettings> {
   Future<void> setPreferOriginalStream(bool value) =>
       _save(_currentSettings.copyWith(preferOriginalStream: value));
 
+  Future<void> setAudioEngineType(VantaAudioEngineType value) =>
+      _save(_currentSettings.copyWith(audioEngineType: value));
+
   AudioSettings get _currentSettings =>
       state.valueOrNull ?? AudioSettings.defaults;
 

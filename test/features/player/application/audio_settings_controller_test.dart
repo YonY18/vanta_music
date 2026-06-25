@@ -53,18 +53,34 @@ void main() {
       await container
           .read(audioSettingsControllerProvider.notifier)
           .setCrossfade(true);
+      await container
+          .read(audioSettingsControllerProvider.notifier)
+          .setAudioEngineType(VantaAudioEngineType.vantaNativeExperimental);
 
       expect(store.saved, [
         const AudioSettings(preferOriginalStream: false),
         const AudioSettings(crossfade: true, preferOriginalStream: false),
+        const AudioSettings(
+          crossfade: true,
+          preferOriginalStream: false,
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
       ]);
       expect(
         applied.last,
-        const AudioSettings(crossfade: true, preferOriginalStream: false),
+        const AudioSettings(
+          crossfade: true,
+          preferOriginalStream: false,
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
       );
       expect(
         container.read(audioSettingsControllerProvider).valueOrNull,
-        const AudioSettings(crossfade: true, preferOriginalStream: false),
+        const AudioSettings(
+          crossfade: true,
+          preferOriginalStream: false,
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
       );
     },
   );
