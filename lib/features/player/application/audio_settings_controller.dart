@@ -22,9 +22,13 @@ final audioSettingsControllerProvider =
     );
 
 class AudioSettingsController extends AsyncNotifier<AudioSettings> {
+  AudioSettings _current = AudioSettings.defaults;
+  Future<void> _pendingSave = Future<void>.value();
+
   @override
   Future<AudioSettings> build() async {
     final settings = await ref.read(audioSettingsStoreProvider).load();
+    _current = settings;
     await ref.read(applyAudioSettingsProvider)(settings);
     return settings;
   }
@@ -44,12 +48,18 @@ class AudioSettingsController extends AsyncNotifier<AudioSettings> {
   Future<void> setAudioEngineType(VantaAudioEngineType value) =>
       _save(_currentSettings.copyWith(audioEngineType: value));
 
-  AudioSettings get _currentSettings =>
-      state.valueOrNull ?? AudioSettings.defaults;
+  AudioSettings get _currentSettings => state.valueOrNull ?? _current;
 
   Future<void> _save(AudioSettings settings) async {
-    await ref.read(audioSettingsStoreProvider).save(settings);
-    await ref.read(applyAudioSettingsProvider)(settings);
+    _current = settings;
     state = AsyncValue.data(settings);
+    final store = ref.read(audioSettingsStoreProvider);
+    final applyAudioSettings = ref.read(applyAudioSettingsProvider);
+    final saveOperation = _pendingSave.catchError((_) {}).then((_) async {
+      await store.save(settings);
+      await applyAudioSettings(settings);
+    });
+    _pendingSave = saveOperation.catchError((_) {});
+    await saveOperation;
   }
 }

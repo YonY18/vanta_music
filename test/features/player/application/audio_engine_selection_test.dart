@@ -139,4 +139,56 @@ void main() {
       );
     },
   );
+
+  test(
+    'keeps eligible content fallback reason out of local-file rejection',
+    () {
+      final source = VantaAudioSource(
+        uri: Uri.parse('content://media/external/audio/media/1'),
+      );
+
+      expect(selection.fallbackReason(source), 'native-engine-not-selected');
+    },
+  );
+
+  test('keeps remote sources on the current engine', () {
+    const settings = AudioSettings(
+      audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+    );
+
+    for (final source in [
+      VantaAudioSource(uri: Uri.https('music.example', '/song.flac')),
+      VantaAudioSource(uri: Uri.http('music.example', '/song.flac')),
+    ]) {
+      expect(
+        selection.shouldAttemptNative(settings: settings, source: source),
+        isFalse,
+      );
+      expect(selection.fallbackReason(source), 'remote-source-unsupported');
+    }
+  });
+
+  test('keeps local file format eligibility unchanged', () {
+    const settings = AudioSettings(
+      audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+    );
+
+    final flac = VantaAudioSource(uri: Uri.file('/music/song.flac'));
+    final wav = VantaAudioSource(uri: Uri.file('/music/song.wav'));
+    final mp3 = VantaAudioSource(uri: Uri.file('/music/song.mp3'));
+
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: flac),
+      isTrue,
+    );
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: wav),
+      isTrue,
+    );
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: mp3),
+      isFalse,
+    );
+    expect(selection.fallbackReason(mp3), 'unsupported-format');
+  });
 }

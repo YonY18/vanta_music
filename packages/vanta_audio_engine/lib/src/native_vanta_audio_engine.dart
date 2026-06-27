@@ -9,6 +9,7 @@ enum NativePlaybackStatus {
   ready,
   playing,
   paused,
+  stopped,
   buffering,
   completed,
   error,
@@ -103,7 +104,7 @@ class NativeVantaAudioEngine {
 
     if (!uri.isScheme('file')) {
       throw const NativeVantaAudioEngineException(
-        'unsupported-source',
+        'unsupported_source',
         'Native engine currently accepts only file:// or eligible content:// local sources.',
       );
     }
@@ -129,8 +130,9 @@ class NativeVantaAudioEngine {
   Future<void> pause() => _invokeVoid('pause');
   Future<void> stop() => _invokeVoid('stop');
 
-  Future<void> seek(Duration position) =>
-      _invokeVoid('seek', {'positionMs': position.inMilliseconds});
+  Future<void> seek(Duration position) => _invokeVoid('seek', {
+    'positionMs': position.isNegative ? 0 : position.inMilliseconds,
+  });
 
   Future<void> setVolume(double volume) =>
       _invokeVoid('setVolume', {'volume': volume.clamp(0, 1)});
@@ -144,11 +146,34 @@ class NativeVantaAudioEngine {
     try {
       await _methodChannel.invokeMethod<void>(method, arguments);
     } on PlatformException catch (error) {
-      throw NativeVantaAudioEngineException(
-        error.code.replaceAll('-', '_'),
-        error.message ?? 'Native audio engine call failed.',
-      );
+      final code = _safePlatformCode(error.code);
+      throw NativeVantaAudioEngineException(code, _safePlatformMessage(code));
     }
+  }
+
+  String _safePlatformCode(String code) => code.replaceAll('-', '_');
+
+  String _safePlatformMessage(String code) {
+    return switch (code) {
+      'unsupported_format' =>
+        'Native engine currently supports only local WAV or FLAC sources.',
+      'file_not_found' => 'Local source does not exist.',
+      'content_open_failed' =>
+        'Native engine could not open this content source.',
+      'content_stage_failed' =>
+        'Native engine could not stage this content source.',
+      'content_too_large' =>
+        'Native engine content source is too large to stage.',
+      'decode_error' => 'Native engine could not decode this audio source.',
+      'output_error' => 'Native engine output could not be opened.',
+      'seek_error' => 'Native engine could not seek this audio source.',
+      'native_method_error' => 'Native audio engine command failed.',
+      'not_prepared' => 'Native engine has no prepared local audio source.',
+      'native_library_unavailable' => 'Native engine library is unavailable.',
+      'invalid_source' => 'Native load requires a valid local audio source.',
+      'unsupported_source' => 'Native engine accepts only local audio sources.',
+      _ => 'Native audio engine call failed.',
+    };
   }
 
   NativePlaybackState _mapPlaybackState(Object? event) {

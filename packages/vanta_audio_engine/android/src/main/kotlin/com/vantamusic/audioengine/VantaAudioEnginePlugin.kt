@@ -1,10 +1,15 @@
 package com.vantamusic.audioengine
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -14,6 +19,9 @@ import java.io.File
 class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private companion object {
         const val STAGING_DIRECTORY_NAME = "vanta_audio_engine"
+        const val PLAYBACK_POLL_INTERVAL_MS = 250L
+        const val DIAGNOSTICS_LOG_INTERVAL_MS = 5_000L
+        const val LOG_TAG = "VantaAudioEngine"
     }
 
     private lateinit var methodChannel: MethodChannel
@@ -23,9 +31,16 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var positionSink: EventChannel.EventSink? = null
     private var durationSink: EventChannel.EventSink? = null
     private var stagedContentFile: File? = null
-    private val completionHandler = Handler(Looper.getMainLooper())
-    private var completionPolling = false
+    private val playbackHandler = Handler(Looper.getMainLooper())
+    private var playbackPolling = false
     private var completionEmitted = false
+    private var lastTerminalState: String? = null
+    private var playbackWakeLock: PowerManager.WakeLock? = null
+    private val keepAliveState = NativePlaybackKeepAliveState()
+    private var lastRenderDiagnosticsLogMs = 0L
+    private var lastRenderDiagnostics: String? = null
+    private var nativePlaybackStartedAtMs = 0L
+    private var lastNativeErrorCode = "none"
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
@@ -47,7 +62,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        stopCompletionPolling()
+        stopPlaybackPolling()
+        releaseNativePlaybackKeepAlive()
         if (nativeLibraryLoaded) {
             disposeNative()
         }
@@ -99,15 +115,23 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     return
                 }
                 emitState("loading")
-                stopCompletionPolling()
+                stopPlaybackPolling()
                 completionEmitted = false
-                if (loadNative(resolvedPath)) {
+                lastTerminalState = null
+                val loaded = loadNative(resolvedPath)
+                if (loaded) {
+                    lastNativeErrorCode = "none"
+                    Log.i(LOG_TAG, outputLifecycleStatusNative())
+                    resetNativeDiagnosticsLogState()
                     emitState("ready")
                     emitDuration()
                     positionSink?.success(positionMsNative())
                     result.success(null)
                 } else {
                     val errorCode = loadErrorCodeNative()
+                    lastNativeErrorCode = errorCode
+                    nativeLoadFailureDiagnosticMessages(loaded, ::outputLifecycleStatusNative)
+                        .forEach { Log.i(LOG_TAG, it) }
                     emitState("error", "Native engine could not prepare this audio file.")
                     cleanupStagedContentFile()
                     result.error(errorCode, "Native engine could not prepare this audio file.", null)
@@ -116,47 +140,64 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "play" -> {
                 if (!requireNativeLibrary(result)) return
                 if (playNative()) {
+                    lastNativeErrorCode = "none"
+                    Log.i(LOG_TAG, outputLifecycleStatusNative())
+                    acquirePlaybackWakeLock()
                     emitState("playing")
-                    startCompletionPolling()
+                    startPlaybackPolling()
                     result.success(null)
                 } else {
+                    lastNativeErrorCode = "output_error"
+                    stopPlaybackPolling()
+                    releaseNativePlaybackKeepAlive("play-failed")
                     emitState("error", "Native engine has no prepared local audio file.")
-                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
+                    result.error("output_error", "Native engine output could not start.", null)
                 }
             }
             "pause" -> {
                 if (!requireNativeLibrary(result)) return
-                if (pauseNative()) {
-                    stopCompletionPolling()
+                val paused = pauseNative()
+                Log.i(LOG_TAG, outputLifecycleStatusNative())
+                logNativeRenderDiagnostics(force = true)
+                stopPlaybackPolling()
+                releaseNativePlaybackKeepAlive(if (paused) "pause" else "pause-failed")
+                if (paused) {
                     emitPosition()
                     emitState("paused")
                     result.success(null)
                 } else {
-                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
+                    Log.i(LOG_TAG, "native-pause=failed keepalive=released")
+                    result.error("native_method_error", "Native pause command failed.", null)
                 }
             }
             "stop" -> {
                 if (!requireNativeLibrary(result)) return
+                logNativeRenderDiagnostics(force = true)
                 val stopped = stopNative()
-                stopCompletionPolling()
+                Log.i(LOG_TAG, outputLifecycleStatusNative())
+                stopPlaybackPolling()
+                releaseNativePlaybackKeepAlive()
                 cleanupStagedContentFile()
                 if (stopped) {
                     positionSink?.success(0)
-                    emitState("ready")
+                    emitState("stopped")
                     result.success(null)
                 } else {
-                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
+                    result.error("native_method_error", "Native stop command failed.", null)
                 }
             }
             "seek" -> {
                 if (!requireNativeLibrary(result)) return
-                val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
-                if (seekNative(positionMs.coerceAtLeast(0L))) {
+                val requestedPositionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                val positionMs = clampSeekPositionMs(requestedPositionMs)
+                if (seekNative(positionMs)) {
+                    lastNativeErrorCode = "none"
                     completionEmitted = false
                     emitPosition()
                     result.success(null)
                 } else {
-                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
+                    lastNativeErrorCode = "seek_error"
+                    result.error("seek_error", "Native seek command failed.", null)
                 }
             }
             "setVolume" -> {
@@ -165,12 +206,13 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 if (setVolumeNative(volume.coerceIn(0.0f, 1.0f))) {
                     result.success(null)
                 } else {
-                    result.error("not_prepared", "Native engine has no prepared local audio file.", null)
+                    result.error("native_method_error", "Native volume command failed.", null)
                 }
             }
             "dispose" -> {
                 if (nativeLibraryLoaded) {
-                    stopCompletionPolling()
+                    stopPlaybackPolling()
+                    releaseNativePlaybackKeepAlive()
                     disposeNative()
                 }
                 cleanupStagedContentFile()
@@ -183,6 +225,12 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun emitState(status: String, errorMessage: String? = null) {
+        if (lastTerminalState == "error" && status == "completed") return
+        if (status == "error" || status == "completed") {
+            lastTerminalState = status
+        } else if (status == "loading" || status == "ready" || status == "playing") {
+            lastTerminalState = null
+        }
         stateSink?.success(mapOf("status" to status, "errorMessage" to errorMessage))
     }
 
@@ -195,32 +243,142 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         durationSink?.success(if (durationMs >= 0L) durationMs else null)
     }
 
-    private fun startCompletionPolling() {
-        if (completionPolling) return
-        completionPolling = true
-        completionHandler.post(completionPoll)
+    private fun startPlaybackPolling() {
+        if (playbackPolling) return
+        playbackPolling = true
+        playbackHandler.post(playbackPoll)
     }
 
-    private fun stopCompletionPolling() {
-        completionPolling = false
-        completionHandler.removeCallbacks(completionPoll)
+    private fun stopPlaybackPolling() {
+        playbackPolling = false
+        playbackHandler.removeCallbacks(playbackPoll)
     }
 
-    private val completionPoll = object : Runnable {
+    private val playbackPoll = object : Runnable {
         override fun run() {
-            if (!completionPolling) return
+            if (!playbackPolling) return
 
             val positionMs = positionMsNative()
             val durationMs = durationMsNative()
+            logNativeRenderDiagnostics()
             positionSink?.success(positionMs)
             if (!completionEmitted && durationMs > 0L && positionMs >= durationMs) {
                 completionEmitted = true
-                completionPolling = false
+                playbackPolling = false
+                logNativeRenderDiagnostics(force = true)
+                val stopped = stopNative()
+                Log.i(LOG_TAG, "native-completion-stop=${if (stopped) "ok" else "failed"}")
+                Log.i(LOG_TAG, outputLifecycleStatusNative())
+                stopPlaybackPolling()
+                releaseNativePlaybackKeepAlive("completion")
+                cleanupStagedContentFile()
+                positionSink?.success(durationMs)
                 emitState("completed")
                 return
             }
 
-            completionHandler.postDelayed(this, 500L)
+            playbackHandler.postDelayed(this, PLAYBACK_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun clampSeekPositionMs(positionMs: Long): Long {
+        val durationMs = durationMsNative()
+        val nonNegative = positionMs.coerceAtLeast(0L)
+        return if (durationMs > 0L) nonNegative.coerceAtMost(durationMs) else nonNegative
+    }
+
+    private fun resetNativeDiagnosticsLogState() {
+        lastRenderDiagnosticsLogMs = 0L
+        lastRenderDiagnostics = null
+    }
+
+    private fun logNativeRenderDiagnostics(force: Boolean = false) {
+        val diagnostics = renderDiagnosticsNative()
+        val previous = lastRenderDiagnostics
+        val changed = diagnostics != previous
+        val nowMs = SystemClock.uptimeMillis()
+        val intervalElapsed = nowMs - lastRenderDiagnosticsLogMs >= DIAGNOSTICS_LOG_INTERVAL_MS
+
+        if (force || (changed && intervalElapsed)) {
+            Log.i(LOG_TAG, "native-render $diagnostics ${keepAliveDiagnostics()}")
+            lastRenderDiagnosticsLogMs = nowMs
+            lastRenderDiagnostics = diagnostics
+        } else if (changed) {
+            lastRenderDiagnostics = diagnostics
+        }
+    }
+
+    @SuppressLint("WakelockTimeout")
+    private fun acquirePlaybackWakeLock() {
+        val existingWakeLock = playbackWakeLock
+        val transition = keepAliveState.markStarted()
+        if (nativePlaybackStartedAtMs == 0L) {
+            nativePlaybackStartedAtMs = SystemClock.uptimeMillis()
+        }
+        if (transition.shouldStartForegroundService) {
+            try {
+                val intent = NativePlaybackService.startIntent(applicationContext)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    applicationContext.startForegroundService(intent)
+                } else {
+                    applicationContext.startService(intent)
+                }
+                Log.i(LOG_TAG, "foreground-service=start-requested type=mediaPlayback")
+            } catch (_: Exception) {
+                Log.i(LOG_TAG, "foreground-service=start-failed type=mediaPlayback")
+            }
+        }
+        if (!transition.shouldAcquireWakeLock || existingWakeLock?.isHeld == true) return
+
+        val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = existingWakeLock ?: powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "VantaMusic:NativePlayback",
+        ).also {
+            it.setReferenceCounted(false)
+            playbackWakeLock = it
+        }
+
+        try {
+            wakeLock.acquire()
+            Log.i(LOG_TAG, "wake-lock=acquired native-background-playback=active")
+        } catch (_: SecurityException) {
+            Log.i(LOG_TAG, "wake-lock=denied native-background-playback=unprotected")
+        }
+    }
+
+    private fun releaseNativePlaybackKeepAlive(reason: String = "release") {
+        val transition = keepAliveState.markStopped()
+        nativePlaybackStartedAtMs = 0L
+        if (transition.shouldStopForegroundService) {
+            try {
+                applicationContext.startService(NativePlaybackService.stopIntent(applicationContext))
+                Log.i(LOG_TAG, "foreground-service=stop-requested reason=$reason")
+            } catch (_: Exception) {
+                Log.i(LOG_TAG, "foreground-service=stop-failed reason=$reason")
+            }
+        }
+        releasePlaybackWakeLock()
+        Log.i(LOG_TAG, "keepalive=released reason=$reason")
+    }
+
+    private fun keepAliveDiagnostics(): String {
+        val continuousPlaybackMs = if (nativePlaybackStartedAtMs > 0L) {
+            SystemClock.uptimeMillis() - nativePlaybackStartedAtMs
+        } else {
+            0L
+        }
+        return "foreground_service_active=${if (keepAliveState.foregroundServiceActive) 1 else 0}" +
+            " wakelock_active=${if (playbackWakeLock?.isHeld == true) 1 else 0}" +
+            " continuous_playback_ms=$continuousPlaybackMs" +
+            " last_native_error=$lastNativeErrorCode"
+    }
+
+    private fun releasePlaybackWakeLock() {
+        val wakeLock = playbackWakeLock ?: return
+        if (wakeLock.isHeld) {
+            wakeLock.release()
+            Log.i(LOG_TAG, "wake-lock=released native-background-playback=inactive")
         }
     }
 
@@ -367,6 +525,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private external fun initNative(): Boolean
     private external fun loadNative(path: String): Boolean
     private external fun loadErrorCodeNative(): String
+    private external fun outputLifecycleStatusNative(): String
+    private external fun renderDiagnosticsNative(): String
     private external fun playNative(): Boolean
     private external fun pauseNative(): Boolean
     private external fun stopNative(): Boolean

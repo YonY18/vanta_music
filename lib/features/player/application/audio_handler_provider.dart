@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -23,6 +24,8 @@ final audioHandlerProvider = Provider<VantaAudioHandler>((ref) {
 });
 
 Future<VantaAudioHandler> initAudioHandler() async {
+  final audioSession = await AudioSession.instance;
+  await audioSession.configure(const AudioSessionConfiguration.music());
   final audioSettingsStore = FileAudioSettingsStore();
   final audioSettings = await audioSettingsStore.load();
   final intelligenceStore = FileLibraryIntelligenceStore();
@@ -51,6 +54,7 @@ Future<VantaAudioHandler> initAudioHandler() async {
       sessionStore: FilePlaybackSessionStore(),
       intelligenceSink: intelligenceSink,
       nativeEngine: NativeVantaEngineAdapter(),
+      audioSession: AudioSessionPlaybackFocus(audioSession),
       streamResolverRegistry: SubsonicStreamResolverRegistry(
         store: subsonicStore,
         clientFactory: ({required server, required password}) =>

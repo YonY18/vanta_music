@@ -23,32 +23,44 @@ class NativeVantaEngineAdapter implements VantaAudioEngine {
   Stream<Duration?> get duration => _engine.duration;
 
   @override
-  Future<void> init() => _engine.init();
+  Future<void> init() => _mapNativeErrors(_engine.init);
 
   @override
-  Future<void> load(VantaAudioSource source) => _engine.load(
-    source.uri,
-    contentMimeType: source.contentMimeType,
-    contentDisplayName: source.contentDisplayName,
+  Future<void> load(VantaAudioSource source) => _mapNativeErrors(
+    () => _engine.load(
+      source.uri,
+      contentMimeType: source.contentMimeType,
+      contentDisplayName: source.contentDisplayName,
+    ),
   );
 
   @override
-  Future<void> play() => _engine.play();
+  Future<void> play() => _mapNativeErrors(_engine.play);
 
   @override
-  Future<void> pause() => _engine.pause();
+  Future<void> pause() => _mapNativeErrors(_engine.pause);
 
   @override
-  Future<void> stop() => _engine.stop();
+  Future<void> stop() => _mapNativeErrors(_engine.stop);
 
   @override
-  Future<void> seek(Duration position) => _engine.seek(position);
+  Future<void> seek(Duration position) =>
+      _mapNativeErrors(() => _engine.seek(position));
 
   @override
-  Future<void> setVolume(double volume) => _engine.setVolume(volume);
+  Future<void> setVolume(double volume) =>
+      _mapNativeErrors(() => _engine.setVolume(volume));
 
   @override
-  Future<void> dispose() => _engine.dispose();
+  Future<void> dispose() => _mapNativeErrors(_engine.dispose);
+
+  Future<void> _mapNativeErrors(Future<void> Function() action) async {
+    try {
+      await action();
+    } on native.NativeVantaAudioEngineException catch (error) {
+      throw VantaAudioEngineException(error.code, error.message);
+    }
+  }
 
   VantaPlaybackStatus _mapStatus(native.NativePlaybackStatus status) {
     return switch (status) {
@@ -57,6 +69,7 @@ class NativeVantaEngineAdapter implements VantaAudioEngine {
       native.NativePlaybackStatus.ready => VantaPlaybackStatus.ready,
       native.NativePlaybackStatus.playing => VantaPlaybackStatus.playing,
       native.NativePlaybackStatus.paused => VantaPlaybackStatus.paused,
+      native.NativePlaybackStatus.stopped => VantaPlaybackStatus.stopped,
       native.NativePlaybackStatus.buffering => VantaPlaybackStatus.buffering,
       native.NativePlaybackStatus.completed => VantaPlaybackStatus.completed,
       native.NativePlaybackStatus.error => VantaPlaybackStatus.error,

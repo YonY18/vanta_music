@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "miniaudio.h"
+#include "vanta_decoder_factory.h"
 #include "vanta_flac_decoder.h"
 
 namespace vanta_audio_engine {
@@ -14,7 +15,7 @@ public:
   bool Seek(uint64_t position_ms);
   uint64_t PositionMs() const;
   int64_t DurationMs() const;
-  void ReadPcmFrames(void *output, ma_uint32 frame_count);
+  ma_uint64 ReadPcmFrames(void *output, ma_uint32 frame_count);
 
   bool IsReady() const;
   ma_format OutputFormat() const;
@@ -22,11 +23,9 @@ public:
   ma_uint32 SampleRate() const;
 
 private:
-  enum class ActiveDecoder { none, wav, flac };
-
   ma_decoder decoder_{};
   VantaFlacDecoder flac_decoder_{};
-  ActiveDecoder active_decoder_ = ActiveDecoder::none;
+  VantaDecoderKind active_decoder_ = VantaDecoderKind::unsupported;
   bool ready_ = false;
   ma_uint64 total_frames_ = 0;
   ma_uint32 sample_rate_ = 0;

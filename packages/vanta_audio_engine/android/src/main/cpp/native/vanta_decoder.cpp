@@ -1,43 +1,27 @@
 #include "vanta_decoder.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
-#include <string>
 
 namespace vanta_audio_engine {
 bool VantaDecoder::SupportsLocalPath(const char *path) const {
-  if (path == nullptr || path[0] == '\0') {
-    return false;
-  }
-  std::string lower_path(path);
-  std::transform(
-      lower_path.begin(), lower_path.end(), lower_path.begin(),
-      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return (lower_path.size() >= 4 &&
-          lower_path.substr(lower_path.size() - 4) == ".wav") ||
-         (lower_path.size() >= 5 &&
-          lower_path.substr(lower_path.size() - 5) == ".flac");
+  return VantaDecoderFactory::SupportsLocalPath(path);
 }
 
 bool VantaDecoder::OpenLocalPath(const char *path) {
-  if (!SupportsLocalPath(path)) {
+  const VantaDecoderKind decoder_kind = VantaDecoderFactory::DetectLocalPath(path);
+  if (decoder_kind == VantaDecoderKind::unsupported) {
     return false;
   }
 
   Close();
 
-  std::string lower_path(path);
-  std::transform(
-      lower_path.begin(), lower_path.end(), lower_path.begin(),
-      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (lower_path.size() >= 5 &&
-      lower_path.substr(lower_path.size() - 5) == ".flac") {
+  if (decoder_kind == VantaDecoderKind::flac) {
     if (!flac_decoder_.OpenLocalPath(path)) {
       Close();
       return false;
     }
-    active_decoder_ = ActiveDecoder::flac;
+    active_decoder_ = VantaDecoderKind::flac;
     ready_ = true;
     sample_rate_ = flac_decoder_.SampleRate();
     channels_ = flac_decoder_.OutputChannels();
@@ -52,7 +36,7 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
     return false;
   }
 
-  active_decoder_ = ActiveDecoder::wav;
+  active_decoder_ = VantaDecoderKind::wav;
   ready_ = true;
   sample_rate_ = decoder_.outputSampleRate;
   channels_ = decoder_.outputChannels;
@@ -64,13 +48,13 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
 }
 
 void VantaDecoder::Close() {
-  if (active_decoder_ == ActiveDecoder::flac) {
+  if (active_decoder_ == VantaDecoderKind::flac) {
     flac_decoder_.Close();
   } else if (ready_) {
     ma_decoder_uninit(&decoder_);
   }
   ready_ = false;
-  active_decoder_ = ActiveDecoder::none;
+  active_decoder_ = VantaDecoderKind::unsupported;
   total_frames_ = 0;
   sample_rate_ = 0;
   channels_ = 0;
@@ -80,10 +64,13 @@ bool VantaDecoder::Seek(uint64_t position_ms) {
   if (!ready_ || sample_rate_ == 0) {
     return false;
   }
-  if (active_decoder_ == ActiveDecoder::flac) {
-    return flac_decoder_.Seek(position_ms);
+  const uint64_t duration_ms = DurationMs() > 0 ? static_cast<uint64_t>(DurationMs()) : 0;
+  const uint64_t clamped_position_ms =
+      duration_ms > 0 ? std::min(position_ms, duration_ms) : position_ms;
+  if (active_decoder_ == VantaDecoderKind::flac) {
+    return flac_decoder_.Seek(clamped_position_ms);
   }
-  const ma_uint64 frame = (position_ms * sample_rate_) / 1000;
+  const ma_uint64 frame = (clamped_position_ms * sample_rate_) / 1000;
   return ma_decoder_seek_to_pcm_frame(&decoder_, frame) == MA_SUCCESS;
 }
 
@@ -91,7 +78,7 @@ uint64_t VantaDecoder::PositionMs() const {
   if (!ready_ || sample_rate_ == 0) {
     return 0;
   }
-  if (active_decoder_ == ActiveDecoder::flac) {
+  if (active_decoder_ == VantaDecoderKind::flac) {
     return flac_decoder_.PositionMs();
   }
   ma_uint64 cursor = 0;
@@ -109,13 +96,12 @@ int64_t VantaDecoder::DurationMs() const {
   return static_cast<int64_t>((total_frames_ * 1000) / sample_rate_);
 }
 
-void VantaDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
+ma_uint64 VantaDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
   if (!ready_) {
-    return;
+    return 0;
   }
-  if (active_decoder_ == ActiveDecoder::flac) {
-    flac_decoder_.ReadPcmFrames(output, frame_count);
-    return;
+  if (active_decoder_ == VantaDecoderKind::flac) {
+    return flac_decoder_.ReadPcmFrames(output, frame_count);
   }
   ma_uint64 frames_read = 0;
   ma_decoder_read_pcm_frames(&decoder_, output, frame_count, &frames_read);
@@ -126,13 +112,14 @@ void VantaDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
                     (frames_read * bytes_per_frame),
                 0, (frame_count - frames_read) * bytes_per_frame);
   }
+  return frames_read;
 }
 
 bool VantaDecoder::IsReady() const { return ready_; }
 
 ma_format VantaDecoder::OutputFormat() const {
-  return active_decoder_ == ActiveDecoder::flac ? flac_decoder_.OutputFormat()
-                                                : decoder_.outputFormat;
+  return active_decoder_ == VantaDecoderKind::flac ? flac_decoder_.OutputFormat()
+                                                   : decoder_.outputFormat;
 }
 
 ma_uint32 VantaDecoder::OutputChannels() const { return channels_; }

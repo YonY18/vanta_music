@@ -318,4 +318,65 @@ void main() {
     expect(calls.single.method, 'load');
     expect(calls.single.arguments, {'path': file.path});
   });
+
+  test('clamps negative seek positions before platform invocation', () async {
+    final calls = <MethodCall>[];
+    final channel = MethodChannel('native_vanta_audio_engine_test_seek');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+    final engine = NativeVantaAudioEngine(methodChannel: channel);
+
+    await engine.seek(const Duration(milliseconds: -250));
+
+    expect(calls.single.method, 'seek');
+    expect(calls.single.arguments, {'positionMs': 0});
+  });
+
+  test('maps stopped playback state events', () async {
+    const channel = EventChannel('native_vanta_audio_engine_test_state');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMessageHandler(channel.name, (message) async {
+          const codec = StandardMethodCodec();
+          final call = codec.decodeMethodCall(message);
+          if (call.method == 'listen') {
+            await TestDefaultBinaryMessengerBinding
+                .instance
+                .defaultBinaryMessenger
+                .handlePlatformMessage(
+                  channel.name,
+                  codec.encodeSuccessEnvelope({
+                    'status': 'stopped',
+                    'errorMessage': null,
+                  }),
+                  (_) {},
+                );
+            return codec.encodeSuccessEnvelope(null);
+          }
+          return codec.encodeSuccessEnvelope(null);
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMessageHandler(channel.name, null);
+    });
+
+    final engine = NativeVantaAudioEngine(playbackStateChannel: channel);
+
+    await expectLater(
+      engine.playbackState,
+      emits(
+        isA<NativePlaybackState>().having(
+          (state) => state.status,
+          'status',
+          NativePlaybackStatus.stopped,
+        ),
+      ),
+    );
+  });
 }

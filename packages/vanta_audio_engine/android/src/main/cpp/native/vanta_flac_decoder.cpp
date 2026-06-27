@@ -1,5 +1,6 @@
 #include "vanta_flac_decoder.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace vanta_audio_engine {
@@ -41,7 +42,10 @@ bool VantaFlacDecoder::Seek(uint64_t position_ms) {
   if (!ready_ || sample_rate_ == 0) {
     return false;
   }
-  const ma_uint64 frame = (position_ms * sample_rate_) / 1000;
+  const uint64_t duration_ms = DurationMs() > 0 ? static_cast<uint64_t>(DurationMs()) : 0;
+  const uint64_t clamped_position_ms =
+      duration_ms > 0 ? std::min(position_ms, duration_ms) : position_ms;
+  const ma_uint64 frame = (clamped_position_ms * sample_rate_) / 1000;
   return ma_decoder_seek_to_pcm_frame(&decoder_, frame) == MA_SUCCESS;
 }
 
@@ -64,9 +68,9 @@ int64_t VantaFlacDecoder::DurationMs() const {
   return static_cast<int64_t>((total_frames_ * 1000) / sample_rate_);
 }
 
-void VantaFlacDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
+ma_uint64 VantaFlacDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
   if (!ready_) {
-    return;
+    return 0;
   }
   ma_uint64 frames_read = 0;
   ma_decoder_read_pcm_frames(&decoder_, output, frame_count, &frames_read);
@@ -77,6 +81,7 @@ void VantaFlacDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
                     (frames_read * bytes_per_frame),
                 0, (frame_count - frames_read) * bytes_per_frame);
   }
+  return frames_read;
 }
 
 bool VantaFlacDecoder::IsReady() const { return ready_; }

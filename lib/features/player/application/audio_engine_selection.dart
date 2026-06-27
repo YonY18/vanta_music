@@ -23,6 +23,7 @@ class VantaAudioEngineSelection {
     if (source.isContentUri && _hasUnsupportedContentEvidence(source)) {
       return 'content-uri-unsupported-dart-evidence';
     }
+    if (source.isContentUri) return 'native-engine-not-selected';
     if (!source.isLocalFile) return 'not-a-local-file';
     if (!_isSupportedNativeLocalFormat(source.uri)) return 'unsupported-format';
     return 'native-engine-not-selected';
