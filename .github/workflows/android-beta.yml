@@ -68,6 +68,9 @@ jobs:
       - name: Check for focused Flutter tests
         run: dart run tool/check_focused_tests.dart
 
+      - name: Run native C++ host tests
+        run: ./tool/run_native_cpp_tests.sh
+
       - name: Run Flutter tests when present
         shell: bash
         run: |

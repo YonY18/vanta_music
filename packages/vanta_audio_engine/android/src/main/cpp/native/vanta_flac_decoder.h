@@ -12,7 +12,7 @@ public:
   bool Seek(uint64_t position_ms);
   uint64_t PositionMs() const;
   int64_t DurationMs() const;
-  void ReadPcmFrames(void *output, ma_uint32 frame_count);
+  ma_uint64 ReadPcmFrames(void *output, ma_uint32 frame_count);
 
   bool IsReady() const;
   ma_format OutputFormat() const;

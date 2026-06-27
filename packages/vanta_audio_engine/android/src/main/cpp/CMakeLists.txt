@@ -10,6 +10,7 @@ add_library(
     SHARED
     native/vanta_engine.cpp
     native/vanta_decoder.cpp
+    native/vanta_decoder_factory.cpp
     native/vanta_flac_decoder.cpp
     native/vanta_output.cpp
 )

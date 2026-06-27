@@ -4,6 +4,7 @@ enum VantaPlaybackStatus {
   ready,
   playing,
   paused,
+  stopped,
   buffering,
   completed,
   error,

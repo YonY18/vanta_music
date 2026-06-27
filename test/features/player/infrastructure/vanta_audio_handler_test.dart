@@ -1,11 +1,15 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/domain/audio_settings.dart';
+import 'package:vanta_music/features/player/domain/playback_session.dart';
 import 'package:vanta_music/features/player/domain/vanta_audio_engine.dart';
+import 'package:vanta_music/features/player/application/playback_session_store.dart';
 import 'package:vanta_music/features/player/infrastructure/vanta_audio_handler.dart';
 
 void main() {
@@ -429,6 +433,422 @@ void main() {
       },
     );
 
+    test(
+      'native play activates the shared app audio session without self-pausing',
+      () async {
+        final native = _RecordingNativeEngine();
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          nativeEngine: native,
+          audioSession: audioSession,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.flac'),
+          originalItem: item,
+          title: item.title,
+        );
+        await handler.play();
+
+        expect(audioSession.activations, [true]);
+        expect(native.playCalls, 1);
+        expect(native.pauseCalls, 0);
+        expect(handler.playbackState.value.playing, isTrue);
+      },
+    );
+
+    test(
+      'immediate native audio interruption pauses native and deactivates app audio focus',
+      () async {
+        final native = _RecordingNativeEngine();
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          nativeEngine: native,
+          audioSession: audioSession,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.flac'),
+          originalItem: item,
+          title: item.title,
+        );
+        await handler.play();
+        audioSession.emitInterruption(
+          AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        await _waitUntil(() => native.pauseCalls == 1);
+
+        expect(native.pauseCalls, 1);
+        expect(audioSession.activations, [true, false]);
+        expect(handler.playbackState.value.playing, isFalse);
+      },
+    );
+
+    test(
+      'immediate unknown native audio interruption pauses native and deactivates app audio focus',
+      () async {
+        final native = _RecordingNativeEngine();
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          nativeEngine: native,
+          audioSession: audioSession,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.flac'),
+          originalItem: item,
+          title: item.title,
+        );
+        await handler.play();
+        audioSession.emitInterruption(
+          AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+        );
+        await _waitUntil(() => native.pauseCalls == 1);
+
+        expect(native.pauseCalls, 1);
+        expect(audioSession.activations, [true, false]);
+        expect(handler.playbackState.value.playing, isFalse);
+      },
+    );
+
+    test(
+      'current-engine playback ignores native interruption bridge',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(audioSession: audioSession);
+        addTearDown(handler.dispose);
+
+        await handler.playMediaItem(_item('file:///queue/current.mp3'));
+        audioSession.emitInterruption(
+          AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        expect(audioSession.activations, isEmpty);
+        expect(platform.player.playCalls, 1);
+        expect(platform.player.events, ['load', 'play']);
+      },
+    );
+
+    test(
+      'native duck interruption lowers volume and restores without resume',
+      () async {
+        final native = _RecordingNativeEngine();
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          nativeEngine: native,
+          audioSession: audioSession,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.flac'),
+          originalItem: item,
+          title: item.title,
+        );
+        await handler.play();
+        audioSession.emitInterruption(
+          AudioInterruptionEvent(true, AudioInterruptionType.duck),
+        );
+        await _waitUntil(() => native.volumes.contains(0.2));
+        audioSession.emitInterruption(
+          AudioInterruptionEvent(false, AudioInterruptionType.duck),
+        );
+        await _waitUntil(() => native.volumes.contains(1.0));
+
+        expect(native.volumes, [0.2, 1.0]);
+        expect(native.playCalls, 1);
+        expect(native.pauseCalls, 0);
+        expect(handler.playbackState.value.playing, isTrue);
+      },
+    );
+
+    test(
+      'becoming noisy event pauses native playback without resume',
+      () async {
+        final native = _RecordingNativeEngine();
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          nativeEngine: native,
+          audioSession: audioSession,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse('file:///queue/local.flac'),
+          originalItem: item,
+          title: item.title,
+        );
+        await handler.play();
+        audioSession.emitBecomingNoisy();
+        await _waitUntil(() => native.pauseCalls == 1);
+
+        expect(native.pauseCalls, 1);
+        expect(native.playCalls, 1);
+        expect(audioSession.activations, [true, false]);
+        expect(handler.playbackState.value.playing, isFalse);
+      },
+    );
+
+    test('explicit native pause deactivates app audio focus', () async {
+      final native = _RecordingNativeEngine();
+      final audioSession = _RecordingPlaybackFocusSession();
+      final handler = VantaAudioHandler(
+        nativeEngine: native,
+        audioSession: audioSession,
+      );
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+      final item = VantaAudioHandler.mediaItemFromTrack(
+        _track('local-1', 'file:///queue/local.flac'),
+      );
+
+      await handler.tryNativeEngineOrFallbackForTesting(
+        Uri.parse('file:///queue/local.flac'),
+        originalItem: item,
+        title: item.title,
+      );
+      await handler.play();
+      await handler.pause();
+
+      expect(audioSession.activations, [true, false]);
+      expect(native.pauseCalls, 1);
+      expect(handler.playbackState.value.playing, isFalse);
+    });
+
+    test(
+      'current-engine remote playback does not use native focus session',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final audioSession = _RecordingPlaybackFocusSession();
+        final handler = VantaAudioHandler(
+          audioSession: audioSession,
+          streamResolverRegistry: _FakeStreamResolverRegistry({
+            'subsonic:server-a::subsonic:server-a:remote-1': Uri.parse(
+              'https://music.example/rest/stream.view?id=remote-1&t=secret',
+            ),
+          }),
+        );
+        addTearDown(handler.dispose);
+
+        await handler.playTracks([
+          _track(
+            'subsonic:server-a:remote-1',
+            'subsonic://track?serverId=server-a&id=remote-1',
+            providerId: 'subsonic:server-a',
+          ),
+        ]);
+
+        expect(audioSession.activations, isEmpty);
+        expect(platform.player.playCalls, 1);
+      },
+    );
+
+    test(
+      'does not pause active native playback for app lifecycle backgrounding',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local-1.flac'),
+          _track('local-2', 'file:///queue/local-2.flac'),
+        ]);
+
+        handler.didChangeAppLifecycleState(AppLifecycleState.paused);
+        native.emitPlaying();
+        native.emitCompleted();
+
+        expect(native.pauseCalls, 0);
+        expect(handler.playbackState.value.playing, isTrue);
+        await expectLater(
+          handler.mediaItem.where(
+            (item) => item?.id == 'file:///queue/local-2.flac',
+          ),
+          emits(isNotNull),
+        );
+        await _waitUntil(() => native.playCalls == 2);
+        expect(platform.player.events, isEmpty);
+      },
+    );
+
+    test('explicit pause while backgrounded pauses native playback', () async {
+      final native = _StreamingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+
+      await handler.setQueueAndPlay([
+        _track('local-1', 'file:///queue/local-1.flac'),
+      ]);
+
+      handler.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await handler.pause();
+
+      expect(native.pauseCalls, 1);
+      expect(handler.playbackState.value.playing, isFalse);
+    });
+
+    test(
+      'resumed lifecycle preserves explicit native pause behavior',
+      () async {
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local-1.flac'),
+        ]);
+
+        handler.didChangeAppLifecycleState(AppLifecycleState.paused);
+        handler.didChangeAppLifecycleState(AppLifecycleState.resumed);
+        await handler.pause();
+
+        expect(native.pauseCalls, 1);
+        expect(handler.playbackState.value.playing, isFalse);
+      },
+    );
+
+    test(
+      'native play broadcasts foreground-eligible audio service state',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local.flac'),
+        ]);
+
+        final state = handler.playbackState.value;
+        expect(handler.mediaItem.value?.id, 'file:///queue/local.flac');
+        expect(state.playing, isTrue);
+        expect(state.processingState, AudioProcessingState.ready);
+        expect(state.queueIndex, 0);
+        expect(state.controls, contains(MediaControl.pause));
+        expect(state.systemActions, contains(MediaAction.pause));
+        expect(state.systemActions, contains(MediaAction.play));
+      },
+    );
+
+    test(
+      'stale current-engine events cannot mark native playback as paused',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'content://media/external/audio/media/1'),
+        ]);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        await handler.play();
+
+        platform.player.emitPausedEvent();
+        platform.player.emitCompleted();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(native.playCalls, greaterThanOrEqualTo(1));
+        expect(native.pauseCalls, 0);
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+        expect(handler.playbackState.value.playing, isTrue);
+        expect(
+          handler.playbackState.value.processingState,
+          AudioProcessingState.ready,
+        );
+      },
+    );
+
     test('native completion advances to the next native queue item', () async {
       final platform = _FakeJustAudioPlatform();
       final originalPlatform = JustAudioPlatform.instance;
@@ -624,6 +1044,303 @@ void main() {
     );
 
     test(
+      'native-ready restored item does not prepare just_audio at startup',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local-1.flac'),
+        );
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(
+          sessionStore: _MemoryPlaybackSessionStore(
+            PlaybackSession(
+              queue: [item],
+              currentIndex: 0,
+              position: const Duration(seconds: 12),
+            ),
+          ),
+          nativeEngine: native,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.restoreSessionIfAvailable();
+
+        expect(handler.mediaItem.value?.id, item.id);
+        expect(native.loadedSources.single.uri.toString(), item.id);
+        expect(native.seekPositions, [const Duration(seconds: 12)]);
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+        expect(platform.player.loadCalls, 0);
+      },
+    );
+
+    test(
+      'play promotes existing current-engine content item after native is enabled',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'content://media/external/audio/media/1'),
+        ]);
+        await handler.pause();
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.play();
+
+        expect(
+          native.loadedSources.single.uri.toString(),
+          'content://media/external/audio/media/1',
+        );
+        expect(native.playCalls, 1);
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+      },
+    );
+
+    test(
+      'applying native mode re-evaluates an existing current-engine item',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'content://media/external/audio/media/1'),
+        ]);
+        await handler.pause();
+
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        expect(
+          native.loadedSources.single.uri.toString(),
+          'content://media/external/audio/media/1',
+        );
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+        expect(native.playCalls, 0);
+      },
+    );
+
+    test(
+      'applying native mode keeps remote http Subsonic current item on current engine',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track(
+            'remote-1',
+            'https://music.example/rest/stream.view?id=remote-1',
+            providerId: 'subsonic:server-a',
+          ),
+        ]);
+        await handler.pause();
+
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        expect(handler.mediaItem.value?.id, contains('remote-1'));
+        expect(native.loadedSources, isEmpty);
+        expect(handler.isNativeEngineActiveForTesting, isFalse);
+        expect(platform.player.loadCalls, 1);
+      },
+    );
+
+    test(
+      'play promotes restored current-engine content item after native is enabled',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'content://media/external/audio/media/1'),
+        );
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(
+          sessionStore: _MemoryPlaybackSessionStore(
+            PlaybackSession(
+              queue: [item],
+              currentIndex: 0,
+              position: Duration.zero,
+            ),
+          ),
+          nativeEngine: native,
+        );
+        addTearDown(handler.dispose);
+
+        await handler.restoreSessionIfAvailable();
+        expect(handler.mediaItem.value?.id, item.id);
+        expect(platform.player.loadCalls, 1);
+        expect(native.loadedSources, isEmpty);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.play();
+
+        expect(native.loadedSources.single.uri.toString(), item.id);
+        expect(native.playCalls, 1);
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+      },
+    );
+
+    test('route decision diagnostics include mode and redacted source', () async {
+      final item = VantaAudioHandler.mediaItemFromTrack(
+        _track('private', 'file:///private/secret/local.flac'),
+      );
+      final handler = VantaAudioHandler(nativeEngine: _RecordingNativeEngine());
+      addTearDown(handler.dispose);
+      final logs = <String>[];
+
+      await runZoned(
+        () => handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        ),
+        zoneSpecification: ZoneSpecification(
+          print: (_, _, _, line) => logs.add(line),
+        ),
+      );
+
+      expect(
+        logs,
+        contains(
+          contains(
+            'route-decision mode=androidDefault owner=current-engine reason=native-engine-not-selected source=file://local',
+          ),
+        ),
+      );
+      expect(logs.join('\n'), isNot(contains('/private/secret/local.flac')));
+    });
+
+    test(
+      'native restore load failure falls back and prepares current engine',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local-1.flac'),
+        );
+        final native = _ThrowingNativeEngine();
+        final handler = VantaAudioHandler(
+          sessionStore: _MemoryPlaybackSessionStore(
+            PlaybackSession(
+              queue: [item],
+              currentIndex: 0,
+              position: const Duration(seconds: 12),
+            ),
+          ),
+          nativeEngine: native,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.restoreSessionIfAvailable();
+
+        expect(native.loadCalls, 1);
+        expect(handler.isNativeEngineActiveForTesting, isFalse);
+        expect(platform.player.loadCalls, 1);
+      },
+    );
+
+    test('stop while native-owned does not stop current engine', () async {
+      final platform = _FakeJustAudioPlatform();
+      final originalPlatform = JustAudioPlatform.instance;
+      JustAudioPlatform.instance = platform;
+      addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+      final native = _RecordingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+
+      await handler.setQueueAndPlay([
+        _track('local-1', 'file:///queue/local-1.flac'),
+      ]);
+      await handler.pause();
+      await handler.stop();
+
+      expect(native.stopCalls, 1);
+      expect(platform.player.events, isEmpty);
+    });
+
+    test(
+      'native error log includes code without sensitive source data',
+      () async {
+        final native = _ThrowingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('private', 'file:///private/secret/local.flac'),
+        );
+        final logs = <String>[];
+
+        await runZoned(
+          () => handler.tryNativeEngineOrFallbackForTesting(
+            Uri.parse(item.id),
+            originalItem: item,
+            title: item.title,
+          ),
+          zoneSpecification: ZoneSpecification(
+            print: (_, _, _, line) => logs.add(line),
+          ),
+        );
+
+        expect(logs, contains(contains('native-error code=native_not_ready')));
+        expect(logs.join('\n'), isNot(contains('/private/secret/local.flac')));
+      },
+    );
+
+    test(
       'native completion to unsupported next item clears native and routes current engine',
       () async {
         final platform = _FakeJustAudioPlatform();
@@ -682,9 +1399,16 @@ void main() {
           _track('local-1', 'file:///queue/local-1.flac'),
           _track('local-2', 'file:///queue/local-2.flac'),
         ]);
+        native.emitDuration(const Duration(minutes: 3));
         native.emitPlaying();
         native.emitCompleted();
         await _waitUntil(() => native.playCalls == 2);
+        expect(native.loadedSources.map((source) => source.uri.toString()), [
+          'file:///queue/local-1.flac',
+          'file:///queue/local-2.flac',
+        ]);
+        expect(native.stopCalls, 0);
+        native.emitDuration(const Duration(minutes: 3));
         native.emitPlaying();
         native.emitCompleted();
 
@@ -697,6 +1421,10 @@ void main() {
         expect(state.processingState, AudioProcessingState.completed);
         expect(state.playing, isFalse);
         expect(state.queueIndex, 1);
+        expect(state.updatePosition, const Duration(minutes: 3));
+        await _waitUntil(() => native.stopCalls == 1);
+        expect(native.stopCalls, 1);
+        expect(handler.isNativeEngineActiveForTesting, isFalse);
       },
     );
 
@@ -837,6 +1565,72 @@ void main() {
     });
 
     test(
+      'forwards native position and duration streams while native owns playback',
+      () async {
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        final durationEvent = expectLater(
+          handler.durationStream,
+          emits(const Duration(minutes: 3)),
+        );
+        final positionEvent = expectLater(
+          handler.positionStream.where(
+            (position) => position == const Duration(seconds: 42),
+          ),
+          emits(const Duration(seconds: 42)),
+        );
+        native.emitDuration(const Duration(minutes: 3));
+        native.emitPosition(const Duration(seconds: 42));
+
+        await durationEvent;
+        await positionEvent;
+      },
+    );
+
+    test('clamps native seeks to known native duration', () async {
+      final native = _StreamingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+      final item = VantaAudioHandler.mediaItemFromTrack(
+        _track('local-1', 'file:///queue/local.flac'),
+      );
+
+      await handler.tryNativeEngineOrFallbackForTesting(
+        Uri.parse(item.id),
+        originalItem: item,
+        title: item.title,
+      );
+      native.emitDuration(const Duration(minutes: 3));
+      await Future<void>.delayed(Duration.zero);
+
+      await handler.seek(const Duration(minutes: 5));
+      await handler.seek(const Duration(milliseconds: -1));
+
+      expect(native.seekPositions, [const Duration(minutes: 3), Duration.zero]);
+    });
+
+    test(
       'skips one failed remote item while preserving playable queue order',
       () async {
         final local = VantaAudioHandler.mediaItemFromTrack(
@@ -966,6 +1760,56 @@ class _PartiallyFailingStreamResolverRegistry
   }
 }
 
+class _MemoryPlaybackSessionStore implements PlaybackSessionStore {
+  _MemoryPlaybackSessionStore(this.session);
+
+  PlaybackSession? session;
+  bool cleared = false;
+
+  @override
+  Future<void> save(PlaybackSession session) async {
+    this.session = session;
+  }
+
+  @override
+  Future<PlaybackSession?> load() async => session;
+
+  @override
+  Future<void> clear() async {
+    cleared = true;
+    session = null;
+  }
+}
+
+class _RecordingPlaybackFocusSession implements PlaybackFocusSession {
+  _RecordingPlaybackFocusSession();
+
+  final activations = <bool>[];
+  final _interruptions = StreamController<AudioInterruptionEvent>.broadcast();
+  final _becomingNoisy = StreamController<void>.broadcast();
+
+  @override
+  Stream<AudioInterruptionEvent> get interruptionEvents =>
+      _interruptions.stream;
+
+  @override
+  Stream<void> get becomingNoisyEvents => _becomingNoisy.stream;
+
+  @override
+  Future<bool> setActive(bool active) async {
+    activations.add(active);
+    return true;
+  }
+
+  void emitInterruption(AudioInterruptionEvent event) {
+    _interruptions.add(event);
+  }
+
+  void emitBecomingNoisy() {
+    _becomingNoisy.add(null);
+  }
+}
+
 class _ThrowingNativeEngine implements VantaAudioEngine {
   int initCalls = 0;
   int loadCalls = 0;
@@ -989,7 +1833,7 @@ class _ThrowingNativeEngine implements VantaAudioEngine {
   Future<void> load(VantaAudioSource source) async {
     loadCalls++;
     throw const VantaAudioEngineException(
-      'native-not-ready',
+      'native_not_ready',
       'Native engine is not ready for playback yet.',
     );
   }
@@ -1018,6 +1862,7 @@ class _ThrowingNativeEngine implements VantaAudioEngine {
 class _RecordingNativeEngine implements VantaAudioEngine {
   final loadedSources = <VantaAudioSource>[];
   final seekPositions = <Duration>[];
+  final volumes = <double>[];
   int playCalls = 0;
   int pauseCalls = 0;
   int stopCalls = 0;
@@ -1060,7 +1905,9 @@ class _RecordingNativeEngine implements VantaAudioEngine {
   }
 
   @override
-  Future<void> setVolume(double volume) async {}
+  Future<void> setVolume(double volume) async {
+    volumes.add(volume);
+  }
 
   @override
   Future<void> dispose() async {}
@@ -1068,9 +1915,17 @@ class _RecordingNativeEngine implements VantaAudioEngine {
 
 class _StreamingNativeEngine extends _RecordingNativeEngine {
   final _playbackState = StreamController<VantaPlaybackState>.broadcast();
+  final _position = StreamController<Duration>.broadcast();
+  final _duration = StreamController<Duration?>.broadcast();
 
   @override
   Stream<VantaPlaybackState> get playbackState => _playbackState.stream;
+
+  @override
+  Stream<Duration> get position => _position.stream;
+
+  @override
+  Stream<Duration?> get duration => _duration.stream;
 
   void emitPlaying() {
     _playbackState.add(
@@ -1084,9 +1939,19 @@ class _StreamingNativeEngine extends _RecordingNativeEngine {
     );
   }
 
+  void emitPosition(Duration position) {
+    _position.add(position);
+  }
+
+  void emitDuration(Duration? duration) {
+    _duration.add(duration);
+  }
+
   @override
   Future<void> dispose() async {
     await _playbackState.close();
+    await _position.close();
+    await _duration.close();
   }
 }
 
@@ -1095,7 +1960,7 @@ class _PlayThrowingNativeEngine extends _StreamingNativeEngine {
   Future<void> play() async {
     playCalls++;
     throw const VantaAudioEngineException(
-      'native-play-failed',
+      'native_play_failed',
       'Native play failed after load.',
     );
   }
@@ -1106,7 +1971,7 @@ class _PauseThrowingNativeEngine extends _StreamingNativeEngine {
   Future<void> pause() async {
     pauseCalls++;
     throw const VantaAudioEngineException(
-      'native-pause-failed',
+      'native_pause_failed',
       'Native pause failed after load.',
     );
   }
@@ -1117,7 +1982,7 @@ class _SeekThrowingNativeEngine extends _StreamingNativeEngine {
   Future<void> seek(Duration position) async {
     seekPositions.add(position);
     throw const VantaAudioEngineException(
-      'native-seek-failed',
+      'native_seek_failed',
       'Native seek failed after load.',
     );
   }
@@ -1213,6 +2078,8 @@ class _FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   }
 
   void emitCompleted() => _emit(ProcessingStateMessage.completed);
+
+  void emitPausedEvent() => _emit(ProcessingStateMessage.ready);
 
   void _emit(ProcessingStateMessage state) {
     _events.add(
