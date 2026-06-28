@@ -106,8 +106,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("invalid-source", "Native load requires a local file path.", null)
                     return
                 }
-                if (!hasSupportedAudioExtension(resolvedPath)) {
-                    result.error("unsupported_format", "Native engine currently supports only local WAV or FLAC files.", null)
+                if (!hasSupportedLocalAudioExtension(resolvedPath)) {
+                    result.error("unsupported_format", "Native engine currently supports only local WAV, FLAC, or MP3 files.", null)
                     return
                 }
                 if (!File(resolvedPath).isFile) {
@@ -416,7 +416,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val metadata = queryOpenableMetadata(uri)
         val resolvedDisplayName = metadata.displayName
         val resolvedSizeBytes = metadata.sizeBytes
-        val extension = supportedExtension(uri, resolvedMimeType, resolvedDisplayName, suppliedMimeType, suppliedDisplayName)
+        val extension = supportedContentExtension(uri, resolvedMimeType, resolvedDisplayName, suppliedMimeType, suppliedDisplayName)
         if (extension == null) {
             result.error("unsupported_format", "Native engine currently supports only local WAV or FLAC content sources.", null)
             return null
@@ -476,21 +476,21 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun supportedExtension(
+    private fun supportedContentExtension(
         uri: Uri,
         resolvedMimeType: String?,
         resolvedDisplayName: String?,
         suppliedMimeType: String?,
         suppliedDisplayName: String?,
     ): String? {
-        return supportedMimeExtension(resolvedMimeType)
-            ?: supportedMimeExtension(suppliedMimeType)
-            ?: supportedPathExtension(resolvedDisplayName)
-            ?: supportedPathExtension(suppliedDisplayName)
-            ?: supportedPathExtension(uri.path)
+        return supportedContentMimeExtension(resolvedMimeType)
+            ?: supportedContentMimeExtension(suppliedMimeType)
+            ?: supportedContentPathExtension(resolvedDisplayName)
+            ?: supportedContentPathExtension(suppliedDisplayName)
+            ?: supportedContentPathExtension(uri.path)
     }
 
-    private fun supportedMimeExtension(mimeType: String?): String? {
+    private fun supportedContentMimeExtension(mimeType: String?): String? {
         return when (mimeType?.lowercase()) {
             "audio/flac", "audio/x-flac" -> ".flac"
             "audio/wav", "audio/x-wav", "audio/wave" -> ".wav"
@@ -498,7 +498,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun supportedPathExtension(path: String?): String? {
+    private fun supportedContentPathExtension(path: String?): String? {
         val lower = path?.lowercase() ?: return null
         return when {
             lower.endsWith(".flac") -> ".flac"
@@ -507,7 +507,17 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun hasSupportedAudioExtension(path: String): Boolean = supportedPathExtension(path) != null
+    private fun supportedLocalPathExtension(path: String?): String? {
+        val lower = path?.lowercase() ?: return null
+        return when {
+            lower.endsWith(".flac") -> ".flac"
+            lower.endsWith(".mp3") -> ".mp3"
+            lower.endsWith(".wav") -> ".wav"
+            else -> null
+        }
+    }
+
+    private fun hasSupportedLocalAudioExtension(path: String): Boolean = supportedLocalPathExtension(path) != null
 
     private fun cleanupStagedContentFile() {
         stagingManager().cleanupCurrent(stagedContentFile)

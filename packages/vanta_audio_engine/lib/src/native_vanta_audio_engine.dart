@@ -119,7 +119,7 @@ class NativeVantaAudioEngine {
     if (!_isSupportedLocalFile(file.path)) {
       throw const NativeVantaAudioEngineException(
         'unsupported_format',
-        'Native engine currently supports only local WAV or FLAC files.',
+        'Native engine currently supports only local WAV, FLAC, or MP3 files.',
       );
     }
 
@@ -156,7 +156,7 @@ class NativeVantaAudioEngine {
   String _safePlatformMessage(String code) {
     return switch (code) {
       'unsupported_format' =>
-        'Native engine currently supports only local WAV or FLAC sources.',
+        'Native engine currently supports only local WAV, FLAC, or MP3 file sources.',
       'file_not_found' => 'Local source does not exist.',
       'content_open_failed' =>
         'Native engine could not open this content source.',
@@ -191,7 +191,7 @@ class NativeVantaAudioEngine {
   }
 
   bool _isSupportedLocalFile(String path) =>
-      _hasSupportedExtension(path.toLowerCase());
+      _hasSupportedLocalFileExtension(path.toLowerCase());
 
   bool _hasUnsupportedContentAudioEvidence(
     Uri uri, {
@@ -212,16 +212,22 @@ class NativeVantaAudioEngine {
 
     final displayName = contentDisplayName?.toLowerCase();
     if (displayName != null && _hasAudioExtension(displayName)) {
-      return !_hasSupportedExtension(displayName);
+      return !_hasSupportedContentExtension(displayName);
     }
 
     final path = uri.path.toLowerCase();
-    if (_hasAudioExtension(path)) return !_hasSupportedExtension(path);
+    if (_hasAudioExtension(path)) return !_hasSupportedContentExtension(path);
 
     return false;
   }
 
-  bool _hasSupportedExtension(String value) {
+  bool _hasSupportedLocalFileExtension(String value) {
+    return value.endsWith('.wav') ||
+        value.endsWith('.flac') ||
+        value.endsWith('.mp3');
+  }
+
+  bool _hasSupportedContentExtension(String value) {
     return value.endsWith('.wav') || value.endsWith('.flac');
   }
 
@@ -229,9 +235,13 @@ class NativeVantaAudioEngine {
     return value.endsWith('.wav') ||
         value.endsWith('.flac') ||
         value.endsWith('.mp3') ||
+        value.endsWith('.alac') ||
         value.endsWith('.m4a') ||
         value.endsWith('.aac') ||
         value.endsWith('.ogg') ||
-        value.endsWith('.opus');
+        value.endsWith('.oga') ||
+        value.endsWith('.opus') ||
+        value.endsWith('.amr') ||
+        value.endsWith('.3gp');
   }
 }

@@ -35,7 +35,7 @@ class VantaAudioEngineSelection {
   }
 
   bool _isSupportedNativeLocalFormat(Uri uri) {
-    return _hasSupportedExtension(uri.toFilePath().toLowerCase());
+    return _hasSupportedLocalFileExtension(uri.toFilePath().toLowerCase());
   }
 
   bool _hasUnsupportedContentEvidence(VantaAudioSource source) {
@@ -53,16 +53,22 @@ class VantaAudioEngineSelection {
 
     final displayName = source.contentDisplayName?.toLowerCase();
     if (displayName != null && _hasAudioExtension(displayName)) {
-      return !_hasSupportedExtension(displayName);
+      return !_hasSupportedContentExtension(displayName);
     }
 
     final path = source.uri.path.toLowerCase();
-    if (_hasAudioExtension(path)) return !_hasSupportedExtension(path);
+    if (_hasAudioExtension(path)) return !_hasSupportedContentExtension(path);
 
     return false;
   }
 
-  bool _hasSupportedExtension(String value) {
+  bool _hasSupportedLocalFileExtension(String value) {
+    return value.endsWith('.wav') ||
+        value.endsWith('.flac') ||
+        value.endsWith('.mp3');
+  }
+
+  bool _hasSupportedContentExtension(String value) {
     return value.endsWith('.wav') || value.endsWith('.flac');
   }
 
@@ -70,9 +76,13 @@ class VantaAudioEngineSelection {
     return value.endsWith('.wav') ||
         value.endsWith('.flac') ||
         value.endsWith('.mp3') ||
+        value.endsWith('.alac') ||
         value.endsWith('.m4a') ||
         value.endsWith('.aac') ||
         value.endsWith('.ogg') ||
-        value.endsWith('.opus');
+        value.endsWith('.oga') ||
+        value.endsWith('.opus') ||
+        value.endsWith('.amr') ||
+        value.endsWith('.3gp');
   }
 }

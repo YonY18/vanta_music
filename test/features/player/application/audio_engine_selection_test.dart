@@ -17,7 +17,7 @@ void main() {
   });
 
   test(
-    'allows native attempts for selected local WAV and FLAC file sources',
+    'allows native attempts for selected local WAV FLAC and MP3 file sources',
     () {
       const settings = AudioSettings(
         audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
@@ -42,7 +42,7 @@ void main() {
           settings: settings,
           source: VantaAudioSource(uri: Uri.file('/music/song.mp3')),
         ),
-        isFalse,
+        isTrue,
       );
       expect(
         selection.shouldAttemptNative(
@@ -55,6 +55,25 @@ void main() {
         selection.shouldAttemptNative(
           settings: settings,
           source: VantaAudioSource(uri: Uri.parse('subsonic://track?id=1')),
+        ),
+        isFalse,
+      );
+      expect(
+        selection.shouldAttemptNative(
+          settings: settings,
+          source: VantaAudioSource(
+            uri: Uri.parse('content://media/external/audio/media/1'),
+            contentDisplayName: 'track.alac',
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        selection.shouldAttemptNative(
+          settings: settings,
+          source: VantaAudioSource(
+            uri: Uri.parse('content://media/external/audio/media/track.alac'),
+          ),
         ),
         isFalse,
       );
@@ -158,7 +177,9 @@ void main() {
 
     for (final source in [
       VantaAudioSource(uri: Uri.https('music.example', '/song.flac')),
+      VantaAudioSource(uri: Uri.https('music.example', '/song.mp3')),
       VantaAudioSource(uri: Uri.http('music.example', '/song.flac')),
+      VantaAudioSource(uri: Uri.http('music.example', '/song.mp3')),
     ]) {
       expect(
         selection.shouldAttemptNative(settings: settings, source: source),
@@ -168,7 +189,7 @@ void main() {
     }
   });
 
-  test('keeps local file format eligibility unchanged', () {
+  test('keeps local file format eligibility music-focused', () {
     const settings = AudioSettings(
       audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
     );
@@ -176,6 +197,9 @@ void main() {
     final flac = VantaAudioSource(uri: Uri.file('/music/song.flac'));
     final wav = VantaAudioSource(uri: Uri.file('/music/song.wav'));
     final mp3 = VantaAudioSource(uri: Uri.file('/music/song.mp3'));
+    final m4a = VantaAudioSource(uri: Uri.file('/music/song.m4a'));
+    final aac = VantaAudioSource(uri: Uri.file('/music/song.aac'));
+    final alac = VantaAudioSource(uri: Uri.file('/music/song.alac'));
 
     expect(
       selection.shouldAttemptNative(settings: settings, source: flac),
@@ -187,8 +211,42 @@ void main() {
     );
     expect(
       selection.shouldAttemptNative(settings: settings, source: mp3),
+      isTrue,
+    );
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: m4a),
       isFalse,
     );
-    expect(selection.fallbackReason(mp3), 'unsupported-format');
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: aac),
+      isFalse,
+    );
+    expect(
+      selection.shouldAttemptNative(settings: settings, source: alac),
+      isFalse,
+    );
+    expect(selection.fallbackReason(m4a), 'unsupported-format');
+    expect(selection.fallbackReason(alac), 'unsupported-format');
   });
+
+  test(
+    'does not attempt native for unsupported phone or container formats',
+    () {
+      const settings = AudioSettings(
+        audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+      );
+
+      for (final extension in ['opus', 'ogg', 'oga', 'amr', '3gp']) {
+        final source = VantaAudioSource(
+          uri: Uri.file('/music/song.$extension'),
+        );
+
+        expect(
+          selection.shouldAttemptNative(settings: settings, source: source),
+          isFalse,
+        );
+        expect(selection.fallbackReason(source), 'unsupported-format');
+      }
+    },
+  );
 }
