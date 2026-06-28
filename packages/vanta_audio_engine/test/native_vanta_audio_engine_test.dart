@@ -70,6 +70,75 @@ void main() {
   );
 
   test(
+    'rejects content ALAC display evidence before platform invocation',
+    () async {
+      final calls = <MethodCall>[];
+      final channel = MethodChannel(
+        'native_vanta_audio_engine_test_content_alac_display',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+      final engine = NativeVantaAudioEngine(methodChannel: channel);
+
+      await expectLater(
+        engine.load(
+          Uri.parse('content://media/external/audio/media/1'),
+          contentDisplayName: 'track.alac',
+        ),
+        throwsA(
+          isA<NativeVantaAudioEngineException>().having(
+            (error) => error.code,
+            'code',
+            'unsupported_format',
+          ),
+        ),
+      );
+      expect(calls, isEmpty);
+    },
+  );
+
+  test(
+    'rejects content ALAC path evidence before platform invocation',
+    () async {
+      final calls = <MethodCall>[];
+      final channel = MethodChannel(
+        'native_vanta_audio_engine_test_content_alac_path',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+      final engine = NativeVantaAudioEngine(methodChannel: channel);
+
+      await expectLater(
+        engine.load(
+          Uri.parse('content://media/external/audio/media/track.alac'),
+        ),
+        throwsA(
+          isA<NativeVantaAudioEngineException>().having(
+            (error) => error.code,
+            'code',
+            'unsupported_format',
+          ),
+        ),
+      );
+      expect(calls, isEmpty);
+    },
+  );
+
+  test(
     'passes content sources without Dart metadata to the platform for validation',
     () async {
       final calls = <MethodCall>[];
@@ -203,13 +272,29 @@ void main() {
   });
 
   test(
-    'rejects unsupported local formats before platform invocation',
+    'rejects unsupported local music-adjacent formats before platform invocation',
     () async {
-      final file = await File(
-        '${Directory.systemTemp.path}/vanta_engine_test.mp3',
-      ).writeAsString('not real audio');
+      final files = <File>[];
+      for (final extension in [
+        'm4a',
+        'aac',
+        'alac',
+        'opus',
+        'ogg',
+        'oga',
+        'amr',
+        '3gp',
+      ]) {
+        files.add(
+          await File(
+            '${Directory.systemTemp.path}/vanta_engine_test.$extension',
+          ).writeAsString('not real audio'),
+        );
+      }
       addTearDown(() async {
-        if (await file.exists()) await file.delete();
+        for (final file in files) {
+          if (await file.exists()) await file.delete();
+        }
       });
       final calls = <MethodCall>[];
       final channel = MethodChannel('native_vanta_audio_engine_test_local');
@@ -224,16 +309,18 @@ void main() {
       });
       final engine = NativeVantaAudioEngine(methodChannel: channel);
 
-      await expectLater(
-        engine.load(file.uri),
-        throwsA(
-          isA<NativeVantaAudioEngineException>().having(
-            (error) => error.code,
-            'code',
-            'unsupported_format',
+      for (final file in files) {
+        await expectLater(
+          engine.load(file.uri),
+          throwsA(
+            isA<NativeVantaAudioEngineException>().having(
+              (error) => error.code,
+              'code',
+              'unsupported_format',
+            ),
           ),
-        ),
-      );
+        );
+      }
 
       expect(calls, isEmpty);
     },
@@ -302,6 +389,32 @@ void main() {
     });
     final calls = <MethodCall>[];
     final channel = MethodChannel('native_vanta_audio_engine_test_flac');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+    final engine = NativeVantaAudioEngine(methodChannel: channel);
+
+    await engine.load(file.uri);
+
+    expect(calls.single.method, 'load');
+    expect(calls.single.arguments, {'path': file.path});
+  });
+
+  test('calls platform load for existing local MP3 files', () async {
+    final file = await File(
+      '${Directory.systemTemp.path}/vanta_engine_test.mp3',
+    ).writeAsString('not real audio');
+    addTearDown(() async {
+      if (await file.exists()) await file.delete();
+    });
+    final calls = <MethodCall>[];
+    final channel = MethodChannel('native_vanta_audio_engine_test_mp3');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);

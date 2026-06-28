@@ -29,6 +29,19 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
     return true;
   }
 
+  if (decoder_kind == VantaDecoderKind::mp3) {
+    if (!mp3_decoder_.OpenLocalPath(path)) {
+      Close();
+      return false;
+    }
+    active_decoder_ = VantaDecoderKind::mp3;
+    ready_ = true;
+    sample_rate_ = mp3_decoder_.SampleRate();
+    channels_ = mp3_decoder_.OutputChannels();
+    total_frames_ = mp3_decoder_.TotalFrames();
+    return true;
+  }
+
   ma_decoder_config decoder_config =
       ma_decoder_config_init(ma_format_f32, 0, 0);
   if (ma_decoder_init_file(path, &decoder_config, &decoder_) != MA_SUCCESS) {
@@ -50,6 +63,8 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
 void VantaDecoder::Close() {
   if (active_decoder_ == VantaDecoderKind::flac) {
     flac_decoder_.Close();
+  } else if (active_decoder_ == VantaDecoderKind::mp3) {
+    mp3_decoder_.Close();
   } else if (ready_) {
     ma_decoder_uninit(&decoder_);
   }
@@ -70,6 +85,9 @@ bool VantaDecoder::Seek(uint64_t position_ms) {
   if (active_decoder_ == VantaDecoderKind::flac) {
     return flac_decoder_.Seek(clamped_position_ms);
   }
+  if (active_decoder_ == VantaDecoderKind::mp3) {
+    return mp3_decoder_.Seek(clamped_position_ms);
+  }
   const ma_uint64 frame = (clamped_position_ms * sample_rate_) / 1000;
   return ma_decoder_seek_to_pcm_frame(&decoder_, frame) == MA_SUCCESS;
 }
@@ -80,6 +98,9 @@ uint64_t VantaDecoder::PositionMs() const {
   }
   if (active_decoder_ == VantaDecoderKind::flac) {
     return flac_decoder_.PositionMs();
+  }
+  if (active_decoder_ == VantaDecoderKind::mp3) {
+    return mp3_decoder_.PositionMs();
   }
   ma_uint64 cursor = 0;
   if (ma_decoder_get_cursor_in_pcm_frames(const_cast<ma_decoder *>(&decoder_),
@@ -103,6 +124,9 @@ ma_uint64 VantaDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
   if (active_decoder_ == VantaDecoderKind::flac) {
     return flac_decoder_.ReadPcmFrames(output, frame_count);
   }
+  if (active_decoder_ == VantaDecoderKind::mp3) {
+    return mp3_decoder_.ReadPcmFrames(output, frame_count);
+  }
   ma_uint64 frames_read = 0;
   ma_decoder_read_pcm_frames(&decoder_, output, frame_count, &frames_read);
   if (frames_read < frame_count) {
@@ -118,8 +142,13 @@ ma_uint64 VantaDecoder::ReadPcmFrames(void *output, ma_uint32 frame_count) {
 bool VantaDecoder::IsReady() const { return ready_; }
 
 ma_format VantaDecoder::OutputFormat() const {
-  return active_decoder_ == VantaDecoderKind::flac ? flac_decoder_.OutputFormat()
-                                                   : decoder_.outputFormat;
+  if (active_decoder_ == VantaDecoderKind::flac) {
+    return flac_decoder_.OutputFormat();
+  }
+  if (active_decoder_ == VantaDecoderKind::mp3) {
+    return mp3_decoder_.OutputFormat();
+  }
+  return decoder_.outputFormat;
 }
 
 ma_uint32 VantaDecoder::OutputChannels() const { return channels_; }

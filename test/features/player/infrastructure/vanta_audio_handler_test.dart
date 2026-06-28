@@ -354,6 +354,73 @@ void main() {
     });
 
     test(
+      'routes local MP3 files to native when experimental mode is enabled',
+      () async {
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-mp3', 'file:///queue/local.mp3'),
+        );
+
+        final nativeReady = await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(nativeReady, isTrue);
+        expect(native.loadedSources.single.uri, Uri.parse(item.id));
+        expect(handler.isNativeEngineActiveForTesting, isTrue);
+      },
+    );
+
+    test(
+      'keeps remote and Subsonic MP3 sources on the current engine',
+      () async {
+        for (final item in [
+          const MediaItem(
+            id: 'https://music.example/rest/stream.view?id=1',
+            title: 'Remote MP3',
+            extras: {'providerId': 'local'},
+          ),
+          const MediaItem(
+            id: 'subsonic://track?serverId=server-a&id=remote-1',
+            title: 'Subsonic MP3',
+            extras: {
+              'providerId': 'subsonic:server-a',
+              'canonicalUri': 'subsonic://track?serverId=server-a&id=remote-1',
+            },
+          ),
+        ]) {
+          final native = _RecordingNativeEngine();
+          final handler = VantaAudioHandler(nativeEngine: native);
+          addTearDown(handler.dispose);
+          await handler.applyAudioSettings(
+            const AudioSettings(
+              audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+            ),
+          );
+
+          final nativeReady = await handler.tryNativeEngineOrFallbackForTesting(
+            Uri.parse(item.id),
+            originalItem: item,
+            title: item.title,
+          );
+
+          expect(nativeReady, isFalse);
+          expect(native.loadedSources, isEmpty);
+          expect(handler.isNativeEngineActiveForTesting, isFalse);
+        }
+      },
+    );
+
+    test(
       'does not crash when native engine fails at the handler fallback seam',
       () async {
         final native = _ThrowingNativeEngine();
@@ -1358,7 +1425,7 @@ void main() {
 
         await handler.setQueueAndPlay([
           _track('local-1', 'file:///queue/local-1.flac'),
-          _track('local-2', 'file:///queue/local-2.mp3'),
+          _track('local-2', 'file:///queue/local-2.m4a'),
         ]);
         native.emitPlaying();
         native.emitCompleted();
@@ -1491,7 +1558,7 @@ void main() {
       () async {
         for (final fallbackItem in [
           VantaAudioHandler.mediaItemFromTrack(
-            _track('local-mp3', 'file:///queue/local.mp3'),
+            _track('local-m4a', 'file:///queue/local.m4a'),
           ),
           VantaAudioHandler.mediaItemFromTrack(
             _track(

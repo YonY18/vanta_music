@@ -15,7 +15,7 @@ Vanta Music is an Android-first Flutter music player focused on local/offline pl
 ![Dart](https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-111111?style=for-the-badge&logo=android&logoColor=3DDC84)
 ![Status](https://img.shields.io/badge/status-internal_beta_prep-7C3AED?style=for-the-badge)
-![License](https://img.shields.io/badge/license-TBD-222222?style=for-the-badge)
+![License](https://img.shields.io/badge/license-GPL--3.0--or--later-222222?style=for-the-badge)
 
 </div>
 
@@ -155,63 +155,6 @@ The codebase should be easy to maintain, test and extend as the project grows.
 
 The architecture should support future integrations with self-hosted music servers and desktop platforms.
 
----
-
-## Getting Started
-
-### Requirements
-
-Before running the project, make sure you have:
-
-- Flutter SDK installed
-- Dart SDK installed
-- Android Studio or Android SDK configured
-- A connected Android device or emulator
-
-Check your environment:
-
-```bash
-flutter doctor
-```
-
----
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/your-username/vanta_music.git
-cd vanta_music
-```
-
-Install dependencies:
-
-```bash
-flutter pub get
-```
-
----
-
-## Running the Project
-
-Run on Android:
-
-```bash
-flutter run
-```
-
-Run tests:
-
-```bash
-flutter test
-```
-
-Build a local release APK:
-
-```bash
-flutter build apk --release
-```
 
 ---
 
@@ -344,11 +287,35 @@ Before contributing code, please open an issue to discuss the change.
 
 ## License
 
-License is not defined yet.
+Vanta Music is licensed under the **GNU General Public License v3.0 or later**.
 
 ```text
-TBD
+GPL-3.0-or-later
 ```
+
+This means Vanta Music is free and open source software. You are free to use, study, modify, and share the project under the terms of the GPL.
+
+If you distribute modified versions or derivative works, you must also provide the corresponding source code under a GPL-compatible license.
+
+### Third-party components
+
+Vanta Music also uses third-party open source components, including Flutter/Dart packages and native audio libraries.
+
+Native/audio-related components may include:
+
+* `libFLAC` for FLAC decoding.
+* `minimp3` or an equivalent open source MP3 decoder for MP3 playback.
+* Android/Flutter audio libraries used by the fallback playback path.
+
+Third-party components remain under their own licenses. See dependency files, package metadata, and native library license files for details.
+
+### Commercial use
+
+Commercial use is allowed under the GPL, but distributed builds must comply with the GPL terms, including source code availability for GPL-covered code.
+
+### No proprietary audio engine
+
+Vanta Music does not use BASS or proprietary audio engines as part of its open source native playback path.
 
 ---
 

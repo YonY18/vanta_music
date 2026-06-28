@@ -21,6 +21,10 @@ VantaDecoderKind VantaDecoderFactory::DetectLocalPath(const char* path) {
     return VantaDecoderKind::flac;
   }
   if (lower_path.size() >= 4 &&
+      lower_path.substr(lower_path.size() - 4) == ".mp3") {
+    return VantaDecoderKind::mp3;
+  }
+  if (lower_path.size() >= 4 &&
       lower_path.substr(lower_path.size() - 4) == ".wav") {
     return VantaDecoderKind::wav;
   }
