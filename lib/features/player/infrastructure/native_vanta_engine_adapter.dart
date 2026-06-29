@@ -1,5 +1,6 @@
 import 'package:vanta_audio_engine/vanta_audio_engine.dart' as native;
 
+import '../domain/audio_technical_info.dart';
 import '../domain/vanta_audio_engine.dart';
 
 class NativeVantaEngineAdapter implements VantaAudioEngine {
@@ -21,6 +22,10 @@ class NativeVantaEngineAdapter implements VantaAudioEngine {
 
   @override
   Stream<Duration?> get duration => _engine.duration;
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo =>
+      _engine.technicalInfo.map(_mapTechnicalInfo);
 
   @override
   Future<void> init() => _mapNativeErrors(_engine.init);
@@ -74,5 +79,30 @@ class NativeVantaEngineAdapter implements VantaAudioEngine {
       native.NativePlaybackStatus.completed => VantaPlaybackStatus.completed,
       native.NativePlaybackStatus.error => VantaPlaybackStatus.error,
     };
+  }
+
+  VantaAudioTechnicalInfo? _mapTechnicalInfo(
+    native.NativeAudioTechnicalInfo? info,
+  ) {
+    if (info == null) return null;
+    return VantaAudioTechnicalInfo(
+      codec: info.codec,
+      bitrateKbps: info.bitrateKbps,
+      sampleRateHz: info.sampleRateHz,
+      bitDepth: info.bitDepth,
+      channels: info.channels,
+      duration: info.duration,
+      fileSizeBytes: info.fileSizeBytes,
+      isLossless: info.isLossless,
+      isVariableBitrate: info.isVariableBitrate,
+      container: info.container,
+      decoderName: info.decoderName,
+      engineName: info.engineName,
+      sourceType: info.sourceType,
+      fallbackReason: info.fallbackReason,
+      pcmFormat: info.pcmFormat,
+      outputSampleRateHz: info.outputSampleRateHz,
+      outputChannels: info.outputChannels,
+    );
   }
 }

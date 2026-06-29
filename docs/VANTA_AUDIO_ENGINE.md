@@ -19,7 +19,7 @@ The long-term goal is a player architecture conceptually closer to AIMP, Poweram
 | Flutter UI | Unchanged. The existing player screens and Audio Settings screen remain the entry points. |
 | App playback owner | `VantaAudioHandler` remains the queue, session, background playback, notification, and MediaSession owner. |
 | Default engine | `just_audio` + `audio_service` stays the stable default. |
-| Engine seam | `VantaAudioEngine` defines `init`, `load`, `play`, `pause`, `stop`, `seek`, `setVolume`, `dispose`, and state/position/duration streams. |
+| Engine seam | `VantaAudioEngine` defines `init`, `load`, `play`, `pause`, `stop`, `seek`, `setVolume`, `dispose`, and state/position/duration/technical-info streams. |
 | Native package | `packages/vanta_audio_engine` provides a MethodChannel/EventChannel bridge, JNI entry points, CMake, and split native files. |
 
 ## Available engines
@@ -42,6 +42,7 @@ The long-term goal is a player architecture conceptually closer to AIMP, Poweram
 - Keeps the native output device open across compatible native-to-native local WAV/FLAC/MP3 loads when sample rate, channel count, and PCM format match. This is an experimental output lifecycle optimization only; it is not full gapless playback, preloading, or crossfade.
 - Implements native `load`, `play`, `pause`, `stop`, `seek`, `setVolume`, and duration/position reads for prepared WAV/FLAC/MP3 files.
 - Emits native state, duration, and periodic position events through EventChannels; the app handler forwards those while the native engine owns playback.
+- Emits best-effort technical audio information after native load. Missing decoder metadata stays unknown instead of blocking playback.
 - Owns playback for native-ready items, including restored startup/session items, without also preparing that same item through `just_audio`; `just_audio` remains the fallback/current engine for unsupported, remote, and native-failed sources.
 - Returns controlled `unsupported_format`, `file_not_found`, `content_open_failed`, `content_stage_failed`, `decode_error`, `output_error`, `seek_error`, or `native_method_error` errors when the native path cannot proceed.
 - Does **not** claim Android `content://` MP3, OGG/Vorbis, Opus, M4A/AAC, remote, or Subsonic/Navidrome native playback support yet.
@@ -106,6 +107,37 @@ This phase keeps the implementation intentionally narrow: state correctness, pos
 | M4A/AAC | No | No | Current engine. |
 | Remote HTTP/HTTPS | No | No | Current engine. |
 | Navidrome/Subsonic | No | No | Existing resolver/current engine path. |
+
+## Technical audio information
+
+Now Playing exposes a minimal **Audio info** sheet with best-effort technical fields for the current track. The sheet is informational only: it must not change routing, decoding, background playback, or fallback behavior.
+
+### Bitrate rule
+
+The user-facing **Bitrate** field is the encoded/file bitrate when available. Vanta may estimate it from file size and duration for local/native files:
+
+```text
+average encoded kbps = file size bytes * 8 / duration milliseconds
+```
+
+PCM/output details are separate and labeled as **Output**. They must not be presented as the encoded bitrate.
+
+### Field availability
+
+| Format/source | Usually available | Often unknown |
+|---------------|-------------------|---------------|
+| Native local FLAC | codec, sample rate, channels, duration, file size, average encoded bitrate, lossless, decoder, engine, source, output PCM format/rate/channels | bit depth, exact stream bitrate, VBR flag |
+| Native local MP3 | codec, sample rate, channels, duration, file size, average encoded bitrate, lossy, decoder, engine, source, output PCM format/rate/channels | bit depth, exact stream bitrate, VBR flag |
+| Native/local WAV | codec, sample rate, channels, duration, file size, average container bitrate, lossless, decoder, engine, source, output PCM format/rate/channels | original bit depth when miniaudio does not expose it |
+| Local fallback M4A/AAC | codec/container inferred from extension or MIME, duration when the media item/player knows it, engine, source, fallback reason | bitrate, sample rate, bit depth, channels unless existing metadata provides them |
+| Remote/Navidrome fallback | source, engine, duration and codec only when existing item/server metadata exposes them | local file size, native decoder/output details, missing server metadata |
+
+### Limitations
+
+- Technical info is best-effort and privacy-safe. Logs continue to use redacted source labels and controlled error codes.
+- No metadata or file I/O is performed from the native render callback. Native details are gathered on load/bridge paths only.
+- Unknown metadata is displayed as `Unknown`; Vanta does not invent values for remote, Navidrome, or fallback sources.
+- This does not add codec support. M4A/AAC, Navidrome/remote streams, and unsupported formats remain on the current engine fallback path.
 
 ### Quick manual test guide
 

@@ -22,6 +22,8 @@ public:
   ma_format OutputFormat() const;
   ma_uint32 OutputChannels() const;
   ma_uint32 SampleRate() const;
+  ma_uint32 SourceBitDepth() const;
+  VantaDecoderKind ActiveDecoderKind() const;
 
 private:
   ma_decoder decoder_{};
@@ -32,5 +34,6 @@ private:
   ma_uint64 total_frames_ = 0;
   ma_uint32 sample_rate_ = 0;
   ma_uint32 channels_ = 0;
+  ma_uint32 source_bit_depth_ = 0;
 };
 } // namespace vanta_audio_engine

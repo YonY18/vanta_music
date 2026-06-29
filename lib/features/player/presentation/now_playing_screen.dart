@@ -15,6 +15,7 @@ import '../../library/domain/track.dart';
 import '../../premium_metadata/application/premium_metadata_providers.dart';
 import '../application/media_item_artwork_request.dart';
 import '../application/player_controller.dart';
+import '../domain/audio_technical_info.dart';
 import '../infrastructure/vanta_audio_handler.dart';
 
 class NowPlayingScreen extends ConsumerWidget {
@@ -45,6 +46,11 @@ class NowPlayingScreen extends ConsumerWidget {
                   tooltip: 'Queue',
                   onPressed: () => _showQueueSheet(context),
                   icon: const Icon(Icons.queue_music_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Audio info',
+                  onPressed: () => _showAudioInfoSheet(context),
+                  icon: const Icon(Icons.graphic_eq_rounded),
                 ),
                 IconButton(
                   tooltip: 'Track info',
@@ -367,6 +373,93 @@ void _showTrackInfoSheet(BuildContext context, MediaItem item) {
       },
     ),
   );
+}
+
+void _showAudioInfoSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (context) => Consumer(
+      builder: (context, ref, _) {
+        final info = ref.watch(audioTechnicalInfoProvider).valueOrNull;
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Audio info',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  _InfoRow(label: 'Format', value: _value(info?.codec)),
+                  _InfoRow(
+                    label: 'Bitrate',
+                    value: formatBitrate(info?.bitrateKbps),
+                  ),
+                  _InfoRow(
+                    label: 'Sample rate',
+                    value: formatSampleRate(info?.sampleRateHz),
+                  ),
+                  _InfoRow(
+                    label: 'Bit depth',
+                    value: formatBitDepth(info?.bitDepth),
+                  ),
+                  _InfoRow(
+                    label: 'Channels',
+                    value: formatChannels(info?.channels),
+                  ),
+                  _InfoRow(
+                    label: 'Duration',
+                    value: formatAudioInfoDuration(info?.duration),
+                  ),
+                  _InfoRow(label: 'Engine', value: _value(info?.engineName)),
+                  _InfoRow(label: 'Source', value: _value(info?.sourceType)),
+                  const Divider(height: 24),
+                  _InfoRow(label: 'Decoder', value: _value(info?.decoderName)),
+                  _InfoRow(
+                    label: 'File size',
+                    value: formatFileSize(info?.fileSizeBytes),
+                  ),
+                  _InfoRow(label: 'Container', value: _value(info?.container)),
+                  _InfoRow(
+                    label: 'Lossless',
+                    value: formatLossless(info?.isLossless),
+                  ),
+                  _InfoRow(label: 'Output', value: _formatOutput(info)),
+                  if (info?.fallbackReason case final reason?
+                      when reason.trim().isNotEmpty)
+                    _InfoRow(label: 'Fallback reason', value: reason),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+String _value(String? value) {
+  final trimmed = value?.trim();
+  return trimmed == null || trimmed.isEmpty ? unknownAudioInfoValue : trimmed;
+}
+
+String _formatOutput(VantaAudioTechnicalInfo? info) {
+  if (info == null) return unknownAudioInfoValue;
+  final sampleRate = formatSampleRate(info.outputSampleRateHz);
+  final channels = formatChannels(info.outputChannels);
+  final pcmFormat = _value(info.pcmFormat);
+  if (sampleRate == unknownAudioInfoValue &&
+      channels == unknownAudioInfoValue &&
+      pcmFormat == unknownAudioInfoValue) {
+    return unknownAudioInfoValue;
+  }
+  return '$sampleRate, $channels, $pcmFormat PCM';
 }
 
 void _showQueueSheet(BuildContext context) {

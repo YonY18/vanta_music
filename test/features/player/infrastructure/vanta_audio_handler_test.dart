@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/domain/audio_settings.dart';
+import 'package:vanta_music/features/player/domain/audio_technical_info.dart';
 import 'package:vanta_music/features/player/domain/playback_session.dart';
 import 'package:vanta_music/features/player/domain/vanta_audio_engine.dart';
 import 'package:vanta_music/features/player/application/playback_session_store.dart';
@@ -377,6 +378,672 @@ void main() {
         expect(nativeReady, isTrue);
         expect(native.loadedSources.single.uri, Uri.parse(item.id));
         expect(handler.isNativeEngineActiveForTesting, isTrue);
+      },
+    );
+
+    test(
+      'publishes native technical info updates from the native engine',
+      () async {
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-flac', 'file:///queue/local.flac'),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+        final expected = expectLater(
+          handler.technicalInfoStream,
+          emitsThrough(
+            isA<VantaAudioTechnicalInfo>()
+                .having((info) => info.codec, 'codec', 'FLAC')
+                .having(
+                  (info) => info.engineName,
+                  'engineName',
+                  'Vanta Native Engine',
+                )
+                .having((info) => info.sampleRateHz, 'sampleRateHz', 44100),
+          ),
+        );
+
+        native.emitTechnicalInfo(
+          const VantaAudioTechnicalInfo(
+            codec: 'FLAC',
+            sampleRateHz: 44100,
+            channels: 2,
+            engineName: 'Vanta Native Engine',
+            sourceType: 'Local file',
+          ),
+        );
+
+        await expected;
+      },
+    );
+
+    test(
+      'preserves native technical info emitted during native load',
+      () async {
+        final native = _LoadTechnicalInfoNativeEngine(
+          const VantaAudioTechnicalInfo(
+            codec: 'FLAC',
+            sampleRateHz: 96000,
+            channels: 2,
+            decoderName: 'miniaudio/dr_flac',
+            engineName: 'Vanta Native Engine',
+            sourceType: 'Local file',
+            outputSampleRateHz: 48000,
+            outputChannels: 2,
+          ),
+        );
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        final published = <VantaAudioTechnicalInfo?>[];
+        final technicalInfoSub = handler.technicalInfoStream.listen(
+          published.add,
+        );
+        addTearDown(technicalInfoSub.cancel);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-flac', 'file:///queue/local.flac'),
+        );
+
+        final nativeReady = await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(nativeReady, isTrue);
+        await Future<void>.delayed(Duration.zero);
+        final externalPublications = published
+            .whereType<VantaAudioTechnicalInfo>()
+            .toList();
+        expect(externalPublications, hasLength(greaterThanOrEqualTo(2)));
+
+        final loadTimePublication =
+            externalPublications[externalPublications.length - 2];
+        final postLoadPublication = externalPublications.last;
+
+        expect(
+          loadTimePublication,
+          isA<VantaAudioTechnicalInfo>()
+              .having(
+                (info) => info.engineName,
+                'engineName',
+                'Vanta Native Engine',
+              )
+              .having((info) => info.sampleRateHz, 'sampleRateHz', 96000)
+              .having((info) => info.channels, 'channels', 2)
+              .having(
+                (info) => info.decoderName,
+                'decoderName',
+                'miniaudio/dr_flac',
+              )
+              .having(
+                (info) => info.outputSampleRateHz,
+                'outputSampleRateHz',
+                48000,
+              )
+              .having((info) => info.outputChannels, 'outputChannels', 2)
+              .having((info) => info.container, 'container', isNull)
+              .having((info) => info.duration, 'duration', isNull)
+              .having((info) => info.isLossless, 'isLossless', isNull),
+        );
+        expect(
+          postLoadPublication,
+          isA<VantaAudioTechnicalInfo>()
+              .having(
+                (info) => info.engineName,
+                'engineName',
+                'Vanta Native Engine',
+              )
+              .having((info) => info.codec, 'codec', 'FLAC')
+              .having((info) => info.container, 'container', 'FLAC')
+              .having(
+                (info) => info.duration,
+                'duration',
+                const Duration(minutes: 3),
+              )
+              .having((info) => info.isLossless, 'isLossless', isTrue)
+              .having((info) => info.sampleRateHz, 'sampleRateHz', 96000)
+              .having((info) => info.channels, 'channels', 2)
+              .having(
+                (info) => info.decoderName,
+                'decoderName',
+                'miniaudio/dr_flac',
+              )
+              .having(
+                (info) => info.outputSampleRateHz,
+                'outputSampleRateHz',
+                48000,
+              )
+              .having((info) => info.outputChannels, 'outputChannels', 2),
+        );
+      },
+    );
+
+    test(
+      'ignores stale prior native load technical info during later load',
+      () async {
+        final staleInfo = const VantaAudioTechnicalInfo(
+          codec: 'FLAC',
+          sampleRateHz: 96000,
+          channels: 2,
+          decoderName: 'stale-prior-load',
+          engineName: 'Vanta Native Engine',
+          sourceType: 'Local file',
+          outputSampleRateHz: 48000,
+          outputChannels: 2,
+        );
+        final native = _StalePriorAttemptTechnicalInfoNativeEngine(staleInfo);
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        final published = <VantaAudioTechnicalInfo?>[];
+        final technicalInfoSub = handler.technicalInfoStream.listen(
+          published.add,
+        );
+        addTearDown(technicalInfoSub.cancel);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-flac', 'file:///queue/local.flac'),
+        );
+
+        final firstAttempt = await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+        final secondAttempt = await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(firstAttempt, isFalse);
+        expect(secondAttempt, isTrue);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          published.last,
+          isA<VantaAudioTechnicalInfo>()
+              .having((info) => info.codec, 'codec', 'FLAC')
+              .having(
+                (info) => info.engineName,
+                'engineName',
+                'Vanta Native Engine',
+              )
+              .having((info) => info.decoderName, 'decoderName', isNull)
+              .having((info) => info.sampleRateHz, 'sampleRateHz', isNull)
+              .having(
+                (info) => info.outputSampleRateHz,
+                'outputSampleRateHz',
+                isNull,
+              ),
+        );
+      },
+    );
+
+    test(
+      'publishes fallback technical info with reason for unsupported M4A',
+      () async {
+        final native = _RecordingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-m4a', 'file:///queue/local.m4a'),
+        );
+        final expected = expectLater(
+          handler.technicalInfoStream,
+          emitsThrough(
+            isA<VantaAudioTechnicalInfo>()
+                .having((info) => info.codec, 'codec', 'AAC')
+                .having(
+                  (info) => info.engineName,
+                  'engineName',
+                  'Fallback Engine',
+                )
+                .having(
+                  (info) => info.fallbackReason,
+                  'fallbackReason',
+                  'unsupported-format',
+                ),
+          ),
+        );
+
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        await expected;
+      },
+    );
+
+    test(
+      'current-engine content FLAC fallback exposes app technical metadata',
+      () async {
+        final handler = VantaAudioHandler();
+        addTearDown(handler.dispose);
+        const item = MediaItem(
+          id: 'content://media/external/audio/media/1',
+          title: 'Local content FLAC',
+          duration: Duration(minutes: 4),
+          extras: {
+            'providerId': 'local',
+            'contentMimeType': 'audio/flac',
+            'codec': 'FLAC',
+            'sampleRateHz': 48000,
+            'channels': 2,
+            'bitrate': 768000,
+          },
+        );
+
+        final nativeReady = await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+
+        expect(nativeReady, isFalse);
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>()
+                .having((info) => info.codec, 'codec', 'FLAC')
+                .having((info) => info.container, 'container', 'FLAC')
+                .having((info) => info.sampleRateHz, 'sampleRateHz', 48000)
+                .having((info) => info.channels, 'channels', 2)
+                .having((info) => info.bitrateKbps, 'bitrateKbps', 768)
+                .having(
+                  (info) => info.duration,
+                  'duration',
+                  const Duration(minutes: 4),
+                )
+                .having((info) => info.isLossless, 'isLossless', isTrue)
+                .having(
+                  (info) => info.engineName,
+                  'engineName',
+                  'Fallback Engine',
+                )
+                .having(
+                  (info) => info.sourceType,
+                  'sourceType',
+                  'Local content',
+                )
+                .having(
+                  (info) => info.fallbackReason,
+                  'fallbackReason',
+                  'native-engine-not-selected',
+                )
+                .having((info) => info.decoderName, 'decoderName', isNull)
+                .having(
+                  (info) => info.outputSampleRateHz,
+                  'outputSampleRateHz',
+                  isNull,
+                ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'restored current-engine session replays technical info to late subscribers',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        const item = MediaItem(
+          id: 'content://media/external/audio/media/restore-flac',
+          title: 'Restored FLAC',
+          duration: Duration(minutes: 4),
+          extras: {
+            'providerId': 'local',
+            'contentMimeType': 'audio/flac',
+            'codec': 'FLAC',
+            'sampleRateHz': 48000,
+            'channels': 2,
+          },
+        );
+        final handler = VantaAudioHandler(
+          sessionStore: _MemoryPlaybackSessionStore(
+            const PlaybackSession(
+              queue: [item],
+              currentIndex: 0,
+              position: Duration(seconds: 7),
+            ),
+          ),
+        );
+        addTearDown(handler.dispose);
+
+        await handler.restoreSessionIfAvailable();
+
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>()
+                .having((info) => info.codec, 'codec', 'FLAC')
+                .having((info) => info.sampleRateHz, 'sampleRateHz', 48000)
+                .having((info) => info.channels, 'channels', 2)
+                .having(
+                  (info) => info.engineName,
+                  'engineName',
+                  'Fallback Engine',
+                ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'unplayable resolved item clears stale technical info for late subscribers',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final failed = _track(
+          'subsonic:server-a:failed',
+          'subsonic://track?serverId=server-a&id=failed',
+          providerId: 'subsonic:server-a',
+        );
+        final handler = VantaAudioHandler(
+          streamResolverRegistry: _PartiallyFailingStreamResolverRegistry(
+            resolved: const {},
+            failures: {
+              'subsonic:server-a::subsonic:server-a:failed':
+                  const RemoteTrackResolveException(
+                    RemoteTrackFailure(
+                      item: MediaItem(
+                        id: 'subsonic://track?serverId=server-a&id=failed',
+                        title: 'Track subsonic:server-a:failed',
+                      ),
+                      message: 'stream unavailable',
+                      retryable: true,
+                    ),
+                  ),
+            },
+          ),
+        );
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/a.mp3'),
+        ]);
+        expect(await handler.technicalInfoStream.first, isNotNull);
+
+        await handler.setQueueAndPlay([failed]);
+
+        expect(handler.mediaItem.value?.id, failed.uri.toString());
+        await expectLater(handler.technicalInfoStream, emits(isNull));
+      },
+    );
+
+    test(
+      'current-engine setup preserves precise native fallback reason',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final handler = VantaAudioHandler(
+          nativeEngine: _RecordingNativeEngine(),
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.setQueueAndPlay([
+          _track('local-m4a', 'file:///queue/a.m4a'),
+        ]);
+
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'unsupported-format',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'selected-engine queue load preserves precise native fallback reason',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final handler = VantaAudioHandler(
+          nativeEngine: _RecordingNativeEngine(),
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local-1.flac'),
+          _track('local-2', 'file:///queue/local-2.m4a'),
+        ]);
+        await handler.skipToQueueItem(1);
+
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'unsupported-format',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'restore URI resolution failure clears stale technical info for late subscribers',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final failed = VantaAudioHandler.mediaItemFromTrack(
+          _track(
+            'subsonic:server-a:restore-fail',
+            'subsonic://track?serverId=server-a&id=restore-fail',
+            providerId: 'subsonic:server-a',
+          ),
+        );
+        final store = _MemoryPlaybackSessionStore(
+          PlaybackSession(
+            queue: [failed],
+            currentIndex: 0,
+            position: const Duration(seconds: 7),
+          ),
+        );
+        final handler = VantaAudioHandler(
+          sessionStore: store,
+          streamResolverRegistry: _PartiallyFailingStreamResolverRegistry(
+            resolved: const {},
+            failures: {
+              'subsonic:server-a::subsonic:server-a:restore-fail':
+                  RemoteTrackResolveException.retryable(
+                    item: failed,
+                    message: 'Subsonic request timed out.',
+                  ),
+            },
+          ),
+        );
+        addTearDown(handler.dispose);
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local-1.flac'),
+        ]);
+        expect(await handler.technicalInfoStream.first, isNotNull);
+        store.session = PlaybackSession(
+          queue: [failed],
+          currentIndex: 0,
+          position: const Duration(seconds: 7),
+        );
+
+        await handler.restoreSessionIfAvailable();
+
+        await expectLater(handler.technicalInfoStream, emits(isNull));
+      },
+    );
+
+    test(
+      'current-engine queue index change updates technical info to the new track',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final handler = VantaAudioHandler();
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'file:///queue/local-1.mp3'),
+          _track('local-2', 'file:///queue/local-2.flac'),
+        ]);
+        final expected = expectLater(
+          handler.technicalInfoStream,
+          emitsThrough(
+            isA<VantaAudioTechnicalInfo>()
+                .having((info) => info.codec, 'codec', 'FLAC')
+                .having((info) => info.sourceType, 'sourceType', 'Local file')
+                .having(
+                  (info) => info.engineName,
+                  'engineName',
+                  'Fallback Engine',
+                ),
+          ),
+        );
+
+        platform.player.emitCurrentIndex(1);
+
+        await expected;
+      },
+    );
+
+    test('current-engine skipToQueueItem updates technical info', () async {
+      final platform = _FakeJustAudioPlatform();
+      final originalPlatform = JustAudioPlatform.instance;
+      JustAudioPlatform.instance = platform;
+      addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+      final handler = VantaAudioHandler();
+      addTearDown(handler.dispose);
+
+      await handler.setQueueAndPlay([
+        _track('local-1', 'file:///queue/local-1.mp3'),
+        _track('local-2', 'file:///queue/local-2.wav'),
+      ]);
+      final expected = expectLater(
+        handler.technicalInfoStream,
+        emitsThrough(
+          isA<VantaAudioTechnicalInfo>()
+              .having((info) => info.codec, 'codec', 'WAV')
+              .having(
+                (info) => info.engineName,
+                'engineName',
+                'Fallback Engine',
+              ),
+        ),
+      );
+
+      await handler.skipToQueueItem(1);
+
+      await expected;
+    });
+
+    test('native async error clears stale native technical info', () async {
+      final native = _StreamingNativeEngine();
+      final handler = VantaAudioHandler(nativeEngine: native);
+      addTearDown(handler.dispose);
+      await handler.applyAudioSettings(
+        const AudioSettings(
+          audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+        ),
+      );
+
+      await handler.setQueueAndPlay([
+        _track('local-1', 'file:///queue/local-1.flac'),
+      ]);
+      final expected = expectLater(
+        handler.technicalInfoStream,
+        emitsThrough(isNull),
+      );
+
+      native.emitErrorState();
+
+      await expected;
+    });
+
+    test(
+      'native technical info stream error clears stale native info',
+      () async {
+        final native = _StreamingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-flac', 'file:///queue/local.flac'),
+        );
+        await handler.tryNativeEngineOrFallbackForTesting(
+          Uri.parse(item.id),
+          originalItem: item,
+          title: item.title,
+        );
+        final expected = expectLater(
+          handler.technicalInfoStream,
+          emitsThrough(isNull),
+        );
+
+        native
+          ..emitTechnicalInfo(
+            const VantaAudioTechnicalInfo(
+              codec: 'FLAC',
+              engineName: 'Vanta Native Engine',
+              sourceType: 'Local file',
+            ),
+          )
+          ..emitTechnicalInfoError();
+
+        await expected;
       },
     );
 
@@ -1007,6 +1674,16 @@ void main() {
         expect(native.playCalls, 1);
         expect(handler.isNativeEngineActiveForTesting, isFalse);
         expect(platform.player.events, ['load', 'play']);
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'native-play-error',
+            ),
+          ),
+        );
       },
     );
 
@@ -1080,6 +1757,16 @@ void main() {
         expect(native.stopCalls, 1);
         expect(handler.isNativeEngineActiveForTesting, isFalse);
         expect(platform.player.events, ['load', 'seek']);
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'native-seek-error',
+            ),
+          ),
+        );
       },
     );
 
@@ -1142,7 +1829,7 @@ void main() {
 
         expect(handler.mediaItem.value?.id, item.id);
         expect(native.loadedSources.single.uri.toString(), item.id);
-        expect(native.seekPositions, [const Duration(seconds: 12)]);
+        expect(native.seekPositions.single, greaterThan(Duration.zero));
         expect(handler.isNativeEngineActiveForTesting, isTrue);
         expect(platform.player.loadCalls, 0);
       },
@@ -1177,6 +1864,43 @@ void main() {
         );
         expect(native.playCalls, 1);
         expect(handler.isNativeEngineActiveForTesting, isTrue);
+      },
+    );
+
+    test(
+      'native promotion seek failure publishes precise fallback reason',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final native = _SeekThrowingNativeEngine();
+        final handler = VantaAudioHandler(nativeEngine: native);
+        addTearDown(handler.dispose);
+
+        await handler.setQueueAndPlay([
+          _track('local-1', 'content://media/external/audio/media/1'),
+        ]);
+        await handler.seek(const Duration(seconds: 12));
+
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        expect(native.seekPositions.single, greaterThan(Duration.zero));
+        expect(handler.isNativeEngineActiveForTesting, isFalse);
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'native-promote-seek-error',
+            ),
+          ),
+        );
       },
     );
 
@@ -1348,6 +2072,51 @@ void main() {
         expect(native.loadCalls, 1);
         expect(handler.isNativeEngineActiveForTesting, isFalse);
         expect(platform.player.loadCalls, 1);
+      },
+    );
+
+    test(
+      'native restore seek failure publishes precise fallback reason',
+      () async {
+        final platform = _FakeJustAudioPlatform();
+        final originalPlatform = JustAudioPlatform.instance;
+        JustAudioPlatform.instance = platform;
+        addTearDown(() => JustAudioPlatform.instance = originalPlatform);
+        final item = VantaAudioHandler.mediaItemFromTrack(
+          _track('local-1', 'file:///queue/local-1.flac'),
+        );
+        final native = _SeekThrowingNativeEngine();
+        final handler = VantaAudioHandler(
+          sessionStore: _MemoryPlaybackSessionStore(
+            PlaybackSession(
+              queue: [item],
+              currentIndex: 0,
+              position: const Duration(seconds: 12),
+            ),
+          ),
+          nativeEngine: native,
+        );
+        addTearDown(handler.dispose);
+        await handler.applyAudioSettings(
+          const AudioSettings(
+            audioEngineType: VantaAudioEngineType.vantaNativeExperimental,
+          ),
+        );
+
+        await handler.restoreSessionIfAvailable();
+
+        expect(native.seekPositions, [const Duration(seconds: 12)]);
+        expect(handler.isNativeEngineActiveForTesting, isFalse);
+        await expectLater(
+          handler.technicalInfoStream,
+          emits(
+            isA<VantaAudioTechnicalInfo>().having(
+              (info) => info.fallbackReason,
+              'fallbackReason',
+              'native-restore-seek-error',
+            ),
+          ),
+        );
       },
     );
 
@@ -1892,6 +2661,9 @@ class _ThrowingNativeEngine implements VantaAudioEngine {
   Stream<Duration?> get duration => const Stream.empty();
 
   @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo => const Stream.empty();
+
+  @override
   Future<void> init() async {
     initCalls++;
   }
@@ -1944,6 +2716,9 @@ class _RecordingNativeEngine implements VantaAudioEngine {
   Stream<Duration?> get duration => const Stream.empty();
 
   @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo => const Stream.empty();
+
+  @override
   Future<void> init() async {}
 
   @override
@@ -1984,6 +2759,7 @@ class _StreamingNativeEngine extends _RecordingNativeEngine {
   final _playbackState = StreamController<VantaPlaybackState>.broadcast();
   final _position = StreamController<Duration>.broadcast();
   final _duration = StreamController<Duration?>.broadcast();
+  final _technicalInfo = StreamController<VantaAudioTechnicalInfo?>.broadcast();
 
   @override
   Stream<VantaPlaybackState> get playbackState => _playbackState.stream;
@@ -1993,6 +2769,9 @@ class _StreamingNativeEngine extends _RecordingNativeEngine {
 
   @override
   Stream<Duration?> get duration => _duration.stream;
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo => _technicalInfo.stream;
 
   void emitPlaying() {
     _playbackState.add(
@@ -2006,6 +2785,12 @@ class _StreamingNativeEngine extends _RecordingNativeEngine {
     );
   }
 
+  void emitErrorState() {
+    _playbackState.add(
+      const VantaPlaybackState(status: VantaPlaybackStatus.error),
+    );
+  }
+
   void emitPosition(Duration position) {
     _position.add(position);
   }
@@ -2014,11 +2799,71 @@ class _StreamingNativeEngine extends _RecordingNativeEngine {
     _duration.add(duration);
   }
 
+  void emitTechnicalInfo(VantaAudioTechnicalInfo? info) {
+    _technicalInfo.add(info);
+  }
+
+  void emitTechnicalInfoError() {
+    _technicalInfo.addError(StateError('technical info stream failed'));
+  }
+
   @override
   Future<void> dispose() async {
     await _playbackState.close();
     await _position.close();
     await _duration.close();
+    await _technicalInfo.close();
+  }
+}
+
+class _LoadTechnicalInfoNativeEngine extends _StreamingNativeEngine {
+  _LoadTechnicalInfoNativeEngine(this.info);
+
+  final VantaAudioTechnicalInfo info;
+
+  @override
+  Future<void> load(VantaAudioSource source) async {
+    await super.load(source);
+    emitTechnicalInfo(info);
+  }
+}
+
+class _StalePriorAttemptTechnicalInfoNativeEngine
+    extends _RecordingNativeEngine {
+  _StalePriorAttemptTechnicalInfoNativeEngine(this.staleInfo);
+
+  final VantaAudioTechnicalInfo staleInfo;
+  final _technicalInfoControllers =
+      <StreamController<VantaAudioTechnicalInfo?>>[];
+  int _loadCalls = 0;
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo {
+    final controller = StreamController<VantaAudioTechnicalInfo?>.broadcast();
+    _technicalInfoControllers.add(controller);
+    return controller.stream;
+  }
+
+  @override
+  Future<void> load(VantaAudioSource source) async {
+    _loadCalls++;
+    if (_loadCalls == 1) {
+      throw const VantaAudioEngineException(
+        'native_first_attempt_failed',
+        'First native load failed.',
+      );
+    }
+
+    _technicalInfoControllers.first.add(staleInfo);
+    await Future<void>.delayed(Duration.zero);
+    loadedSources.add(source);
+  }
+
+  @override
+  Future<void> dispose() async {
+    for (final controller in _technicalInfoControllers) {
+      await controller.close();
+    }
   }
 }
 
@@ -2079,6 +2924,7 @@ class _FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   final seekIndexes = <int>[];
   final events = <String>[];
   int? currentIndex = 0;
+  Duration position = Duration.zero;
   int loadCalls = 0;
   int playCalls = 0;
 
@@ -2133,6 +2979,7 @@ class _FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   Future<SeekResponse> seek(SeekRequest request) async {
     events.add('seek');
     currentIndex = request.index ?? currentIndex;
+    position = request.position ?? position;
     if (request.index != null) seekIndexes.add(request.index!);
     _emit(ProcessingStateMessage.ready);
     return SeekResponse();
@@ -2148,12 +2995,17 @@ class _FakeAudioPlayerPlatform extends AudioPlayerPlatform {
 
   void emitPausedEvent() => _emit(ProcessingStateMessage.ready);
 
+  void emitCurrentIndex(int index) {
+    currentIndex = index;
+    _emit(ProcessingStateMessage.ready);
+  }
+
   void _emit(ProcessingStateMessage state) {
     _events.add(
       PlaybackEventMessage(
         processingState: state,
         updateTime: DateTime.now(),
-        updatePosition: Duration.zero,
+        updatePosition: position,
         bufferedPosition: Duration.zero,
         duration: const Duration(minutes: 3),
         icyMetadata: null,

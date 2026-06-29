@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/player/application/player_controller.dart';
+import 'package:vanta_music/features/player/domain/audio_technical_info.dart';
 import 'package:vanta_music/features/player/presentation/mini_player.dart';
 import 'package:vanta_music/features/premium_metadata/application/premium_metadata_providers.dart';
 import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dart';
@@ -88,6 +89,10 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
 
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfoStream =>
+      const Stream.empty();
 
   @override
   Future<void> playTracks(tracks, {int initialIndex = 0}) async {}

@@ -7,6 +7,67 @@ import 'package:vanta_audio_engine/vanta_audio_engine.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'maps native technical info events without mixing PCM and encoded bitrate',
+    () {
+      final info = NativeAudioTechnicalInfo.fromEvent({
+        'codec': 'FLAC',
+        'bitrateKbps': 921,
+        'sampleRateHz': 44100,
+        'bitDepth': 24,
+        'channels': 2,
+        'durationMs': 180000,
+        'fileSizeBytes': 20722500,
+        'isLossless': true,
+        'container': 'FLAC',
+        'decoderName': 'dr_flac',
+        'engineName': 'Vanta Native Engine',
+        'sourceType': 'Local file',
+        'pcmFormat': 'float32',
+        'outputSampleRateHz': 44100,
+        'outputChannels': 2,
+      });
+
+      expect(info.codec, 'FLAC');
+      expect(info.bitrateKbps, 921);
+      expect(info.sampleRateHz, 44100);
+      expect(info.bitDepth, 24);
+      expect(info.channels, 2);
+      expect(info.duration, const Duration(minutes: 3));
+      expect(info.fileSizeBytes, 20722500);
+      expect(info.isLossless, isTrue);
+      expect(info.decoderName, 'dr_flac');
+      expect(info.pcmFormat, 'float32');
+      expect(info.outputSampleRateHz, 44100);
+      expect(info.outputChannels, 2);
+    },
+  );
+
+  test('maps native MP3 technical info without inventing source bit depth', () {
+    final info = NativeAudioTechnicalInfo.fromEvent({
+      'codec': 'MP3',
+      'bitrateKbps': 320,
+      'sampleRateHz': 44100,
+      'channels': 2,
+      'durationMs': 240000,
+      'fileSizeBytes': 9600000,
+      'isLossless': false,
+      'container': 'MP3',
+      'decoderName': 'dr_mp3',
+      'engineName': 'Vanta Native Engine',
+      'sourceType': 'Local file',
+      'pcmFormat': 'float32',
+      'outputSampleRateHz': 48000,
+      'outputChannels': 2,
+    });
+
+    expect(info.codec, 'MP3');
+    expect(info.bitDepth, isNull);
+    expect(info.pcmFormat, 'float32');
+    expect(info.outputSampleRateHz, 48000);
+    expect(info.outputChannels, 2);
+  });
+
   test('rejects remote sources before platform invocation', () async {
     final calls = <MethodCall>[];
     final channel = MethodChannel('native_vanta_audio_engine_test_remote');
