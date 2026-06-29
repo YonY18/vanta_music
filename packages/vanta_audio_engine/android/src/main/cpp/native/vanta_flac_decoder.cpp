@@ -1,9 +1,34 @@
 #include "vanta_flac_decoder.h"
 
+#include "vanta_flac_streaminfo.h"
+
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <fstream>
 
 namespace vanta_audio_engine {
+namespace {
+ma_uint32 ReadFlacSourceBitDepth(const char *path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    return 0;
+  }
+
+  std::array<uint8_t, 42> header{};
+  file.read(reinterpret_cast<char *>(header.data()), header.size());
+  if (file.gcount() != static_cast<std::streamsize>(header.size())) {
+    return 0;
+  }
+
+  VantaFlacStreamInfo info{};
+  if (!ParseNativeFlacStreamInfo(header.data(), header.size(), &info)) {
+    return 0;
+  }
+  return info.bits_per_sample;
+}
+} // namespace
+
 bool VantaFlacDecoder::OpenLocalPath(const char *path) {
   if (path == nullptr || path[0] == '\0') {
     return false;
@@ -21,6 +46,7 @@ bool VantaFlacDecoder::OpenLocalPath(const char *path) {
   ready_ = true;
   sample_rate_ = decoder_.outputSampleRate;
   channels_ = decoder_.outputChannels;
+  source_bit_depth_ = ReadFlacSourceBitDepth(path);
   if (ma_decoder_get_length_in_pcm_frames(&decoder_, &total_frames_) !=
       MA_SUCCESS) {
     total_frames_ = 0;
@@ -36,6 +62,7 @@ void VantaFlacDecoder::Close() {
   total_frames_ = 0;
   sample_rate_ = 0;
   channels_ = 0;
+  source_bit_depth_ = 0;
 }
 
 bool VantaFlacDecoder::Seek(uint64_t position_ms) {
@@ -93,6 +120,8 @@ ma_format VantaFlacDecoder::OutputFormat() const {
 ma_uint32 VantaFlacDecoder::OutputChannels() const { return channels_; }
 
 ma_uint32 VantaFlacDecoder::SampleRate() const { return sample_rate_; }
+
+ma_uint32 VantaFlacDecoder::SourceBitDepth() const { return source_bit_depth_; }
 
 ma_uint64 VantaFlacDecoder::TotalFrames() const { return total_frames_; }
 } // namespace vanta_audio_engine

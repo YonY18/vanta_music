@@ -8,6 +8,7 @@ import 'package:vanta_music/features/downloads/application/download_providers.da
 import 'package:vanta_music/features/downloads/domain/download_item.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/application/player_controller.dart';
+import 'package:vanta_music/features/player/domain/audio_technical_info.dart';
 import 'package:vanta_music/features/player/presentation/now_playing_screen.dart';
 import 'package:vanta_music/features/premium_metadata/application/premium_metadata_providers.dart';
 import 'package:vanta_music/features/premium_metadata/domain/metadata_models.dart';
@@ -96,6 +97,56 @@ void main() {
 
     expect(control.playNextTrack?.id, 'a');
     expect(control.addEndTrack?.id, 'a');
+  });
+
+  testWidgets('shows audio technical info rows', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mediaItemProvider.overrideWith((ref) => Stream.value(_item('a'))),
+          currentQueueProvider.overrideWith(
+            (ref) => Stream.value([_item('a')]),
+          ),
+          playbackPositionProvider.overrideWith(
+            (ref) => Stream.value(Duration.zero),
+          ),
+          playbackDurationProvider.overrideWith(
+            (ref) => Stream.value(const Duration(minutes: 3)),
+          ),
+          playbackStateProvider.overrideWith(
+            (ref) => Stream.value(PlaybackState()),
+          ),
+          audioTechnicalInfoProvider.overrideWith(
+            (ref) => Stream.value(
+              const VantaAudioTechnicalInfo(
+                codec: 'FLAC',
+                bitrateKbps: 912,
+                sampleRateHz: 44100,
+                bitDepth: 16,
+                channels: 2,
+                duration: Duration(minutes: 3, seconds: 5),
+                engineName: 'Vanta Native Engine',
+                sourceType: 'Local file',
+              ),
+            ),
+          ),
+          playerControllerProvider.overrideWithValue(
+            PlayerController(_FakePlayerAudioControl()),
+          ),
+        ],
+        child: const MaterialApp(home: NowPlayingScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Audio info'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Audio info'), findsOneWidget);
+    expect(_richTextContaining('Format: FLAC'), findsOneWidget);
+    expect(_richTextContaining('Bitrate: 912 kbps'), findsOneWidget);
+    expect(_richTextContaining('Sample rate: 44.1 kHz'), findsOneWidget);
+    expect(_richTextContaining('Engine: Vanta Native Engine'), findsOneWidget);
   });
 
   testWidgets(
@@ -306,6 +357,13 @@ MediaItem _item(String id, {String providerId = 'local', String? uri}) =>
       },
     );
 
+Finder _richTextContaining(String value) {
+  return find.byWidgetPredicate(
+    (widget) => widget is RichText && widget.text.toPlainText().contains(value),
+    description: 'RichText containing $value',
+  );
+}
+
 class _ControlledMetadataOverrideStore implements MetadataOverrideStore {
   final Completer<MetadataOverride?> _completer =
       Completer<MetadataOverride?>();
@@ -345,6 +403,10 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
 
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfoStream =>
+      const Stream.empty();
 
   @override
   Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) async {}

@@ -3,7 +3,6 @@ package com.vantamusic.audioengine
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -30,6 +29,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var stateSink: EventChannel.EventSink? = null
     private var positionSink: EventChannel.EventSink? = null
     private var durationSink: EventChannel.EventSink? = null
+    private var technicalInfoSink: EventChannel.EventSink? = null
     private var stagedContentFile: File? = null
     private val playbackHandler = Handler(Looper.getMainLooper())
     private var playbackPolling = false
@@ -41,6 +41,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var lastRenderDiagnostics: String? = null
     private var nativePlaybackStartedAtMs = 0L
     private var lastNativeErrorCode = "none"
+    private var loadedSourceInfo: LoadedSourceInfo? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
@@ -58,6 +59,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             .setStreamHandler(SimpleStreamHandler { positionSink = it })
         EventChannel(binding.binaryMessenger, "vanta_audio_engine/duration")
             .setStreamHandler(SimpleStreamHandler { durationSink = it })
+        EventChannel(binding.binaryMessenger, "vanta_audio_engine/technical_info")
+            .setStreamHandler(SimpleStreamHandler { technicalInfoSink = it })
         cleanupStaleStagedContentFiles()
     }
 
@@ -73,6 +76,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         stateSink = null
         positionSink = null
         durationSink = null
+        technicalInfoSink = null
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -84,6 +88,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 emitState("idle")
                 positionSink?.success(0)
                 durationSink?.success(null)
+                technicalInfoSink?.success(null)
                 result.success(null)
             }
             "load" -> {
@@ -92,12 +97,13 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val path = call.argument<String>("path")
                 val contentUri = call.argument<String>("uri")
                 val resolvedPath = if (!contentUri.isNullOrBlank()) {
-                    stageContentUri(
+                    val staged = stageContentUri(
                         contentUri = contentUri,
                         suppliedMimeType = call.argument<String>("contentMimeType"),
                         suppliedDisplayName = call.argument<String>("contentDisplayName"),
                         result = result,
                     ) ?: return
+                    staged
                 } else {
                     cleanupStagedContentFile()
                     path
@@ -114,6 +120,11 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("file_not_found", "Local source does not exist.", null)
                     return
                 }
+                loadedSourceInfo = LoadedSourceInfo(
+                    path = resolvedPath,
+                    sourceType = if (!contentUri.isNullOrBlank()) "Local content" else "Local file",
+                    fileSizeBytes = File(resolvedPath).length().takeIf { it > 0L },
+                )
                 emitState("loading")
                 stopPlaybackPolling()
                 completionEmitted = false
@@ -125,6 +136,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     resetNativeDiagnosticsLogState()
                     emitState("ready")
                     emitDuration()
+                    emitTechnicalInfo()
                     positionSink?.success(positionMsNative())
                     result.success(null)
                 } else {
@@ -134,6 +146,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         .forEach { Log.i(LOG_TAG, it) }
                     emitState("error", "Native engine could not prepare this audio file.")
                     cleanupStagedContentFile()
+                    loadedSourceInfo = null
+                    technicalInfoSink?.success(null)
                     result.error(errorCode, "Native engine could not prepare this audio file.", null)
                 }
             }
@@ -178,6 +192,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 stopPlaybackPolling()
                 releaseNativePlaybackKeepAlive()
                 cleanupStagedContentFile()
+                loadedSourceInfo = null
+                technicalInfoSink?.success(null)
                 if (stopped) {
                     positionSink?.success(0)
                     emitState("stopped")
@@ -216,6 +232,8 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     disposeNative()
                 }
                 cleanupStagedContentFile()
+                loadedSourceInfo = null
+                technicalInfoSink?.success(null)
                 cleanupStaleStagedContentFiles()
                 emitState("idle")
                 result.success(null)
@@ -241,6 +259,41 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun emitDuration() {
         val durationMs = durationMsNative()
         durationSink?.success(if (durationMs >= 0L) durationMs else null)
+    }
+
+    private fun emitTechnicalInfo() {
+        val source = loadedSourceInfo ?: return
+        val durationMs = durationMsNative().takeIf { it > 0L }
+        val fileSizeBytes = source.fileSizeBytes
+        val bitrateKbps = if (fileSizeBytes != null && durationMs != null) {
+            ((fileSizeBytes * 8.0) / durationMs).toInt()
+        } else {
+            null
+        }
+        val codec = technicalCodecNative().takeUnless { it == "unknown" }
+        technicalInfoSink?.success(
+            mapOf(
+                "codec" to codec,
+                "bitrateKbps" to bitrateKbps,
+                "sampleRateHz" to technicalSampleRateNative().takeIf { it > 0 },
+                "bitDepth" to technicalBitDepthNative().takeIf { it > 0 },
+                "channels" to technicalChannelsNative().takeIf { it > 0 },
+                "durationMs" to durationMs,
+                "fileSizeBytes" to fileSizeBytes,
+                "isLossless" to when (codec) {
+                    "FLAC", "WAV" -> true
+                    "MP3" -> false
+                    else -> null
+                },
+                "container" to codec,
+                "decoderName" to technicalDecoderNameNative().takeUnless { it == "unknown" },
+                "engineName" to "Vanta Native Engine",
+                "sourceType" to source.sourceType,
+                "pcmFormat" to technicalPcmFormatNative().takeUnless { it == "unknown" },
+                "outputSampleRateHz" to technicalOutputSampleRateNative().takeIf { it > 0 },
+                "outputChannels" to technicalOutputChannelsNative().takeIf { it > 0 },
+            )
+        )
     }
 
     private fun startPlaybackPolling() {
@@ -315,19 +368,6 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (nativePlaybackStartedAtMs == 0L) {
             nativePlaybackStartedAtMs = SystemClock.uptimeMillis()
         }
-        if (transition.shouldStartForegroundService) {
-            try {
-                val intent = NativePlaybackService.startIntent(applicationContext)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    applicationContext.startForegroundService(intent)
-                } else {
-                    applicationContext.startService(intent)
-                }
-                Log.i(LOG_TAG, "foreground-service=start-requested type=mediaPlayback")
-            } catch (_: Exception) {
-                Log.i(LOG_TAG, "foreground-service=start-failed type=mediaPlayback")
-            }
-        }
         if (!transition.shouldAcquireWakeLock || existingWakeLock?.isHeld == true) return
 
         val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -350,14 +390,6 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun releaseNativePlaybackKeepAlive(reason: String = "release") {
         val transition = keepAliveState.markStopped()
         nativePlaybackStartedAtMs = 0L
-        if (transition.shouldStopForegroundService) {
-            try {
-                applicationContext.startService(NativePlaybackService.stopIntent(applicationContext))
-                Log.i(LOG_TAG, "foreground-service=stop-requested reason=$reason")
-            } catch (_: Exception) {
-                Log.i(LOG_TAG, "foreground-service=stop-failed reason=$reason")
-            }
-        }
         releasePlaybackWakeLock()
         Log.i(LOG_TAG, "keepalive=released reason=$reason")
     }
@@ -368,8 +400,7 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         } else {
             0L
         }
-        return "foreground_service_active=${if (keepAliveState.foregroundServiceActive) 1 else 0}" +
-            " wakelock_active=${if (playbackWakeLock?.isHeld == true) 1 else 0}" +
+        return "wakelock_active=${if (playbackWakeLock?.isHeld == true) 1 else 0}" +
             " continuous_playback_ms=$continuousPlaybackMs" +
             " last_native_error=$lastNativeErrorCode"
     }
@@ -537,6 +568,14 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private external fun loadErrorCodeNative(): String
     private external fun outputLifecycleStatusNative(): String
     private external fun renderDiagnosticsNative(): String
+    private external fun technicalSampleRateNative(): Int
+    private external fun technicalChannelsNative(): Int
+    private external fun technicalBitDepthNative(): Int
+    private external fun technicalOutputSampleRateNative(): Int
+    private external fun technicalOutputChannelsNative(): Int
+    private external fun technicalPcmFormatNative(): String
+    private external fun technicalCodecNative(): String
+    private external fun technicalDecoderNameNative(): String
     private external fun playNative(): Boolean
     private external fun pauseNative(): Boolean
     private external fun stopNative(): Boolean
@@ -550,6 +589,12 @@ class VantaAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 private data class OpenableMetadata(
     val displayName: String? = null,
     val sizeBytes: Long? = null,
+)
+
+private data class LoadedSourceInfo(
+    val path: String,
+    val sourceType: String,
+    val fileSizeBytes: Long?,
 )
 
 private class SimpleStreamHandler(

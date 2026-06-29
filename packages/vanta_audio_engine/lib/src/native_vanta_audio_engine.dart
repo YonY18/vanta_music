@@ -22,6 +22,89 @@ class NativePlaybackState {
   final String? errorMessage;
 }
 
+class NativeAudioTechnicalInfo {
+  const NativeAudioTechnicalInfo({
+    this.codec,
+    this.bitrateKbps,
+    this.sampleRateHz,
+    this.bitDepth,
+    this.channels,
+    this.duration,
+    this.fileSizeBytes,
+    this.isLossless,
+    this.isVariableBitrate,
+    this.container,
+    this.decoderName,
+    this.engineName,
+    this.sourceType,
+    this.fallbackReason,
+    this.pcmFormat,
+    this.outputSampleRateHz,
+    this.outputChannels,
+  });
+
+  factory NativeAudioTechnicalInfo.fromEvent(Object? event) {
+    if (event is! Map) return const NativeAudioTechnicalInfo();
+    return NativeAudioTechnicalInfo(
+      codec: event['codec']?.toString(),
+      bitrateKbps: _intValue(event['bitrateKbps']),
+      sampleRateHz: _intValue(event['sampleRateHz']),
+      bitDepth: _intValue(event['bitDepth']),
+      channels: _intValue(event['channels']),
+      duration: _durationValue(event['durationMs']),
+      fileSizeBytes: _intValue(event['fileSizeBytes']),
+      isLossless: _boolValue(event['isLossless']),
+      isVariableBitrate: _boolValue(event['isVariableBitrate']),
+      container: event['container']?.toString(),
+      decoderName: event['decoderName']?.toString(),
+      engineName: event['engineName']?.toString(),
+      sourceType: event['sourceType']?.toString(),
+      fallbackReason: event['fallbackReason']?.toString(),
+      pcmFormat: event['pcmFormat']?.toString(),
+      outputSampleRateHz: _intValue(event['outputSampleRateHz']),
+      outputChannels: _intValue(event['outputChannels']),
+    );
+  }
+
+  final String? codec;
+  final int? bitrateKbps;
+  final int? sampleRateHz;
+  final int? bitDepth;
+  final int? channels;
+  final Duration? duration;
+  final int? fileSizeBytes;
+  final bool? isLossless;
+  final bool? isVariableBitrate;
+  final String? container;
+  final String? decoderName;
+  final String? engineName;
+  final String? sourceType;
+  final String? fallbackReason;
+  final String? pcmFormat;
+  final int? outputSampleRateHz;
+  final int? outputChannels;
+
+  static int? _intValue(Object? value) {
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  static bool? _boolValue(Object? value) {
+    if (value is bool) return value;
+    if (value == null) return null;
+    return switch (value.toString()) {
+      'true' || '1' => true,
+      'false' || '0' => false,
+      _ => null,
+    };
+  }
+
+  static Duration? _durationValue(Object? value) {
+    final ms = _intValue(value);
+    return ms == null || ms < 0 ? null : Duration(milliseconds: ms);
+  }
+}
+
 class NativeVantaAudioEngineException implements Exception {
   const NativeVantaAudioEngineException(this.code, this.message);
 
@@ -38,25 +121,31 @@ class NativeVantaAudioEngine {
     EventChannel? playbackStateChannel,
     EventChannel? positionChannel,
     EventChannel? durationChannel,
+    EventChannel? technicalInfoChannel,
   }) : _methodChannel = methodChannel ?? const MethodChannel(_methodName),
        _playbackStateChannel =
            playbackStateChannel ?? const EventChannel(_stateName),
        _positionChannel = positionChannel ?? const EventChannel(_positionName),
-       _durationChannel = durationChannel ?? const EventChannel(_durationName);
+       _durationChannel = durationChannel ?? const EventChannel(_durationName),
+       _technicalInfoChannel =
+           technicalInfoChannel ?? const EventChannel(_technicalInfoName);
 
   static const _methodName = 'vanta_audio_engine/methods';
   static const _stateName = 'vanta_audio_engine/playback_state';
   static const _positionName = 'vanta_audio_engine/position';
   static const _durationName = 'vanta_audio_engine/duration';
+  static const _technicalInfoName = 'vanta_audio_engine/technical_info';
 
   final MethodChannel _methodChannel;
   final EventChannel _playbackStateChannel;
   final EventChannel _positionChannel;
   final EventChannel _durationChannel;
+  final EventChannel _technicalInfoChannel;
 
   Stream<NativePlaybackState>? _playbackState;
   Stream<Duration>? _position;
   Stream<Duration?>? _duration;
+  Stream<NativeAudioTechnicalInfo?>? _technicalInfo;
 
   Stream<NativePlaybackState> get playbackState => _playbackState ??=
       _playbackStateChannel.receiveBroadcastStream().map(_mapPlaybackState);
@@ -71,6 +160,9 @@ class NativeVantaAudioEngine {
             ? null
             : Duration(milliseconds: (event as num).toInt()),
       );
+
+  Stream<NativeAudioTechnicalInfo?> get technicalInfo => _technicalInfo ??=
+      _technicalInfoChannel.receiveBroadcastStream().map(_mapTechnicalInfo);
 
   Future<void> init() => _invokeVoid('init');
 
@@ -188,6 +280,12 @@ class NativeVantaAudioEngine {
       ),
       errorMessage: event['errorMessage']?.toString(),
     );
+  }
+
+  NativeAudioTechnicalInfo? _mapTechnicalInfo(Object? event) {
+    if (event == null) return null;
+    if (event is! Map) return null;
+    return NativeAudioTechnicalInfo.fromEvent(event);
   }
 
   bool _isSupportedLocalFile(String path) =>

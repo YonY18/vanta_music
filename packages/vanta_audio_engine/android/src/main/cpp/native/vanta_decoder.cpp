@@ -25,6 +25,7 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
     ready_ = true;
     sample_rate_ = flac_decoder_.SampleRate();
     channels_ = flac_decoder_.OutputChannels();
+    source_bit_depth_ = flac_decoder_.SourceBitDepth();
     total_frames_ = flac_decoder_.TotalFrames();
     return true;
   }
@@ -38,6 +39,7 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
     ready_ = true;
     sample_rate_ = mp3_decoder_.SampleRate();
     channels_ = mp3_decoder_.OutputChannels();
+    source_bit_depth_ = 0;
     total_frames_ = mp3_decoder_.TotalFrames();
     return true;
   }
@@ -53,6 +55,7 @@ bool VantaDecoder::OpenLocalPath(const char *path) {
   ready_ = true;
   sample_rate_ = decoder_.outputSampleRate;
   channels_ = decoder_.outputChannels;
+  source_bit_depth_ = 0;
   if (ma_decoder_get_length_in_pcm_frames(&decoder_, &total_frames_) !=
       MA_SUCCESS) {
     total_frames_ = 0;
@@ -73,6 +76,7 @@ void VantaDecoder::Close() {
   total_frames_ = 0;
   sample_rate_ = 0;
   channels_ = 0;
+  source_bit_depth_ = 0;
 }
 
 bool VantaDecoder::Seek(uint64_t position_ms) {
@@ -154,4 +158,8 @@ ma_format VantaDecoder::OutputFormat() const {
 ma_uint32 VantaDecoder::OutputChannels() const { return channels_; }
 
 ma_uint32 VantaDecoder::SampleRate() const { return sample_rate_; }
+
+ma_uint32 VantaDecoder::SourceBitDepth() const { return source_bit_depth_; }
+
+VantaDecoderKind VantaDecoder::ActiveDecoderKind() const { return active_decoder_; }
 } // namespace vanta_audio_engine

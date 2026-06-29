@@ -1,3 +1,5 @@
+import 'audio_technical_info.dart';
+
 enum VantaPlaybackStatus {
   idle,
   loading,
@@ -48,6 +50,7 @@ abstract interface class VantaAudioEngine {
   Stream<VantaPlaybackState> get playbackState;
   Stream<Duration> get position;
   Stream<Duration?> get duration;
+  Stream<VantaAudioTechnicalInfo?> get technicalInfo;
 
   Future<void> init();
   Future<void> load(VantaAudioSource source);

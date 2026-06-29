@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../library/domain/track.dart';
+import '../domain/audio_technical_info.dart';
 import 'audio_handler_provider.dart';
 
 final mediaItemProvider = StreamProvider<MediaItem?>((ref) {
@@ -20,6 +21,12 @@ final playbackDurationProvider = StreamProvider<Duration?>((ref) {
   return ref.watch(audioHandlerProvider).durationStream;
 });
 
+final audioTechnicalInfoProvider = StreamProvider<VantaAudioTechnicalInfo?>((
+  ref,
+) {
+  return ref.watch(audioHandlerProvider).technicalInfoStream;
+});
+
 final currentQueueProvider = StreamProvider<List<MediaItem>>((ref) {
   return ref.watch(audioHandlerProvider).queue;
 });
@@ -34,6 +41,7 @@ abstract interface class PlayerAudioControl {
   Stream<List<MediaItem>> get queue;
   Stream<Duration> get positionStream;
   Stream<Duration?> get durationStream;
+  Stream<VantaAudioTechnicalInfo?> get technicalInfoStream;
 
   Future<void> playTracks(List<Track> tracks, {int initialIndex = 0});
   Future<void> play();

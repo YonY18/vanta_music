@@ -42,6 +42,14 @@ public:
   const char *LoadErrorCode() const;
   std::string OutputLifecycleStatus() const;
   std::string RenderDiagnostics() const;
+  ma_uint32 TechnicalSampleRate() const;
+  ma_uint32 TechnicalChannels() const;
+  ma_uint32 TechnicalBitDepth() const;
+  ma_uint32 TechnicalOutputSampleRate() const;
+  ma_uint32 TechnicalOutputChannels() const;
+  const char *TechnicalPcmFormat() const;
+  const char *TechnicalCodec() const;
+  const char *TechnicalDecoderName() const;
   void Dispose();
 
 private:

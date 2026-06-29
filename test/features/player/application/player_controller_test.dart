@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vanta_music/features/library/domain/track.dart';
 import 'package:vanta_music/features/player/application/player_controller.dart';
+import 'package:vanta_music/features/player/domain/audio_technical_info.dart';
 
 void main() {
   group('PlayerController queue commands', () {
@@ -56,6 +57,10 @@ class _FakePlayerAudioControl implements PlayerAudioControl {
 
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
+
+  @override
+  Stream<VantaAudioTechnicalInfo?> get technicalInfoStream =>
+      const Stream.empty();
 
   @override
   Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) async {}

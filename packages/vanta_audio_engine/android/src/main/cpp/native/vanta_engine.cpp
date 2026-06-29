@@ -185,6 +185,75 @@ std::string VantaEngine::RenderDiagnostics() const {
   return FormatRenderDiagnostics(RenderDiagnosticsSnapshot());
 }
 
+ma_uint32 VantaEngine::TechnicalSampleRate() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  return decoder_.SampleRate();
+}
+
+ma_uint32 VantaEngine::TechnicalChannels() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  return decoder_.OutputChannels();
+}
+
+ma_uint32 VantaEngine::TechnicalBitDepth() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  return decoder_.SourceBitDepth();
+}
+
+ma_uint32 VantaEngine::TechnicalOutputSampleRate() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  return decoder_.SampleRate();
+}
+
+ma_uint32 VantaEngine::TechnicalOutputChannels() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  return decoder_.OutputChannels();
+}
+
+const char *VantaEngine::TechnicalPcmFormat() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  switch (decoder_.OutputFormat()) {
+  case ma_format_f32:
+    return "float32";
+  case ma_format_s16:
+    return "s16";
+  case ma_format_s24:
+    return "s24";
+  case ma_format_s32:
+    return "s32";
+  default:
+    return "unknown";
+  }
+}
+
+const char *VantaEngine::TechnicalCodec() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  switch (decoder_.ActiveDecoderKind()) {
+  case VantaDecoderKind::flac:
+    return "FLAC";
+  case VantaDecoderKind::mp3:
+    return "MP3";
+  case VantaDecoderKind::wav:
+    return "WAV";
+  default:
+    return "unknown";
+  }
+}
+
+const char *VantaEngine::TechnicalDecoderName() const {
+  std::lock_guard<std::mutex> state_lock(state_mutex_);
+  switch (decoder_.ActiveDecoderKind()) {
+  case VantaDecoderKind::flac:
+    return "dr_flac";
+  case VantaDecoderKind::mp3:
+    return "dr_mp3";
+  case VantaDecoderKind::wav:
+    return "miniaudio";
+  default:
+    return "unknown";
+  }
+}
+
 void VantaEngine::Dispose() {
   std::lock_guard<std::mutex> state_lock(state_mutex_);
   ResetUnlocked();
@@ -434,6 +503,54 @@ Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_renderDiagnosticsNative(
     JNIEnv *env, jobject) {
   const std::string diagnostics = engine.RenderDiagnostics();
   return env->NewStringUTF(diagnostics.c_str());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalSampleRateNative(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(engine.TechnicalSampleRate());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalChannelsNative(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(engine.TechnicalChannels());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalBitDepthNative(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(engine.TechnicalBitDepth());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalOutputSampleRateNative(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(engine.TechnicalOutputSampleRate());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalOutputChannelsNative(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(engine.TechnicalOutputChannels());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalPcmFormatNative(
+    JNIEnv *env, jobject) {
+  return env->NewStringUTF(engine.TechnicalPcmFormat());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalCodecNative(
+    JNIEnv *env, jobject) {
+  return env->NewStringUTF(engine.TechnicalCodec());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_vantamusic_audioengine_VantaAudioEnginePlugin_technicalDecoderNameNative(
+    JNIEnv *env, jobject) {
+  return env->NewStringUTF(engine.TechnicalDecoderName());
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
